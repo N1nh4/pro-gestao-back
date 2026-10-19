@@ -1,0 +1,47 @@
+[tool.poetry]
+name = "sac-progestao-api"
+version = "0.1.0"
+description = "API do SAC Pró-Gestão RPPS (FastAPI + SQLAlchemy + PostgreSQL)"
+authors = ["SAC Pró-Gestão <dev@fumpres.ba.gov.br>"]
+readme = "README.md"
+package-mode = false
+
+[tool.poetry.dependencies]
+python = ">=3.11,<3.14"
+fastapi = "^0.115"
+uvicorn = { extras = ["standard"], version = "^0.32" }
+sqlalchemy = "^2.0"
+psycopg = { extras = ["binary"], version = "^3.2" }
+pydantic = "^2.9"
+pydantic-settings = "^2.6"
+python-jose = { extras = ["cryptography"], version = "^3.3" }
+bcrypt = ">=4.1,<6"
+python-multipart = "^0.0.12"
+redis = "^5.2"
+email-validator = "^2.2"
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^8.3"
+httpx = "^0.27"
+ruff = "^0.7"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.ruff]
+line-length = 110
+target-version = "py311"
+extend-exclude = [".venv"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+ignore = ["B008"]
+
+[tool.ruff.lint.per-file-ignores]
+# Dados de seed em formato tabular — linhas longas são intencionais.
+"app/db/seed.py" = ["E501"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]

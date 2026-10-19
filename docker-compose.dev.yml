@@ -1,0 +1,39 @@
+# Infra local para desenvolvimento (PostgreSQL + Redis).
+# Uso: docker compose -f docker-compose.dev.yml up -d
+#
+# Este arquivo sobe APENAS a infraestrutura. O compose completo da aplicação
+# (API + frontend) será criado depois.
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: sac_postgres
+    environment:
+      POSTGRES_USER: sac_progestao
+      POSTGRES_PASSWORD: sac_progestao
+      POSTGRES_DB: sac_progestao
+    ports:
+      - "5432:5432"
+    volumes:
+      - sac_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U sac_progestao -d sac_progestao"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    container_name: sac_redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - sac_redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  sac_pgdata:
+  sac_redisdata:
