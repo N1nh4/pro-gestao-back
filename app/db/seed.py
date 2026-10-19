@@ -55,6 +55,18 @@ def seed() -> None:
             entidade_certificadora="IEPREV",
             num_segurados=12500,
             email_contato="fumpres@salvador.ba.gov.br",
+            representante_legal="Felipe Araújo",
+            cpf_representante="123.456.789-00",
+            data_inicio_processo=date(2024, 1, 15),
+            data_fim_processo=date(2025, 12, 31),
+            codigo_siafi="938002",
+            cep="40015-970",
+            cidade="Salvador",
+            tipo_logradouro="Avenida",
+            logradouro="Av. Vale dos Barris",
+            numero="1055",
+            bairro="Barris",
+            complemento="Prédio da FUMPRES",
             ativo=True,
         )
         db.add(tenant)
@@ -131,7 +143,6 @@ def seed() -> None:
             ("u002", "002", "joao.silva", "auditor@fumpres.ba.gov.br", "João Silva"),
             ("u003", "003", "maria.costa", "operador@fumpres.ba.gov.br", "Maria Costa"),
             ("u004", "004", "pedro.lima", "viewer@previc.gov.br", "Pedro Lima"),
-            ("u005", "005", "katiane.vieira", "katiane@fumpres.ba.gov.br", "Katiane Vieira"),
         ]
         for uid, seq, login, email, nome in usuarios_data:
             db.add(
@@ -173,8 +184,6 @@ def seed() -> None:
             ("u002", None, "pf05"),
             ("u003", "un04", "pf03"),
             ("u004", "un02", "pf04"),
-            ("u005", "un03", "pf03"),
-            ("u005", None, "pf05"),
         ]
         for uid, unid, pid in vinculos:
             db.add(
@@ -373,7 +382,6 @@ def seed() -> None:
         print("   Admin do Ente  → auditor@fumpres.ba.gov.br")
         print("   Operador       → operador@fumpres.ba.gov.br")
         print("   Visualizador   → viewer@previc.gov.br")
-        print("   Katiane Vieira → katiane@fumpres.ba.gov.br")
 
     except Exception as exc:
         db.rollback()

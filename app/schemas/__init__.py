@@ -23,12 +23,16 @@ from app.schemas.progestao import (
     RequisitoOut,
 )
 from app.schemas.rbac import (
+    EnteOut,
+    EnteUpdate,
     PerfilCreate,
     PerfilOut,
     UnidadeCreate,
     UnidadeOut,
+    UnidadeUpdate,
     UsuarioCreate,
     UsuarioOut,
+    UsuarioUpdate,
 )
 
 __all__ = [
@@ -36,10 +40,14 @@ __all__ = [
     "TokenResponse",
     "UsuarioCreate",
     "UsuarioOut",
+    "UsuarioUpdate",
+    "EnteOut",
+    "EnteUpdate",
     "PerfilCreate",
     "PerfilOut",
     "UnidadeCreate",
     "UnidadeOut",
+    "UnidadeUpdate",
     "RequisitoOut",
     "AcaoCreate",
     "AcaoOut",

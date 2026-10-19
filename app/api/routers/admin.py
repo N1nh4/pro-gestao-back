@@ -7,11 +7,15 @@ from sqlalchemy.orm import Session
 from app.api.deps import get_usuario_atual
 from app.core.security import hash_senha
 from app.db import get_db
-from app.models import Perfil, Unidade, Usuario, UsuarioUnidadePerfil
+from app.models import Perfil, Tenant, Unidade, Usuario, UsuarioUnidadePerfil
 from app.schemas import (
+    EnteOut,
+    EnteUpdate,
     PerfilCreate,
     UnidadeCreate,
+    UnidadeUpdate,
     UsuarioCreate,
+    UsuarioUpdate,
 )
 
 router = APIRouter(tags=["Administração"])
@@ -57,6 +61,13 @@ def listar_usuarios(
         perfis_ids = list({v.perfil_id for v in vinculos})
         perfis = db.query(Perfil).filter(Perfil.id.in_(perfis_ids)).all()
 
+        unidades_ids = list({v.unidade_id for v in vinculos if v.unidade_id})
+        unidades = (
+            db.query(Unidade).filter(Unidade.id.in_(unidades_ids)).all()
+            if unidades_ids
+            else []
+        )
+
         result.append(
             {
                 "id": u.id,
@@ -66,6 +77,7 @@ def listar_usuarios(
                 "nome_completo": u.nome_completo,
                 "status": u.status,
                 "perfis": [{"id": p.id, "nome": p.nome} for p in perfis],
+                "unidades": [{"id": un.id, "sigla": un.sigla} for un in unidades],
                 "criado_em": u.criado_em,
             }
         )
@@ -112,19 +124,149 @@ def criar_usuario(
     db.flush()
 
     unidades = req.unidade_ids or [None]
-    for uid in unidades:
-        db.add(
-            UsuarioUnidadePerfil(
-                usuario_id=novo.id,
-                unidade_id=uid,
-                perfil_id=req.perfil_id,
-                concedido_por=atual.id,
+    perfis = req.perfil_ids or [req.perfil_id]
+    for perfil_id in perfis:
+        for uid in unidades:
+            db.add(
+                UsuarioUnidadePerfil(
+                    usuario_id=novo.id,
+                    unidade_id=uid,
+                    perfil_id=perfil_id,
+                    concedido_por=atual.id,
+                )
             )
-        )
 
     db.commit()
     db.refresh(novo)
     return {"id": novo.id, "login": login, "id_usuario": id_usuario}
+
+
+@router.put("/api/usuarios/{usuario_id}")
+def atualizar_usuario(
+    usuario_id: str,
+    req: UsuarioUpdate,
+    db: Session = Depends(get_db),
+    atual: Usuario = Depends(get_usuario_atual),
+):
+    alvo = (
+        db.query(Usuario)
+        .filter(Usuario.id == usuario_id, Usuario.tenant_id == atual.tenant_id)
+        .first()
+    )
+    if not alvo:
+        raise HTTPException(status_code=404, detail="Usuário não encontrado")
+
+    dados = req.model_dump(exclude_unset=True)
+
+    if "email" in dados and dados["email"]:
+        email = dados["email"].lower()
+        existe = (
+            db.query(Usuario)
+            .filter(
+                Usuario.tenant_id == atual.tenant_id,
+                Usuario.email == email,
+                Usuario.id != alvo.id,
+            )
+            .first()
+        )
+        if existe:
+            raise HTTPException(status_code=400, detail="E-mail já cadastrado neste ente")
+        alvo.email = email
+
+    if dados.get("nome_completo"):
+        alvo.nome_completo = dados["nome_completo"]
+    if dados.get("status"):
+        alvo.status = dados["status"]
+    if dados.get("senha"):
+        alvo.senha_hash = hash_senha(dados["senha"])
+
+    if "perfil_id" in dados or "perfil_ids" in dados or "unidade_ids" in dados:
+        vinculos_atuais = (
+            db.query(UsuarioUnidadePerfil)
+            .filter(UsuarioUnidadePerfil.usuario_id == alvo.id)
+            .all()
+        )
+
+        if "perfil_ids" in dados:
+            perfis_alvo = dados.get("perfil_ids") or []
+        elif "perfil_id" in dados:
+            perfis_alvo = [dados["perfil_id"]] if dados["perfil_id"] else []
+        else:
+            perfis_alvo = list({v.perfil_id for v in vinculos_atuais})
+        if not perfis_alvo:
+            raise HTTPException(status_code=400, detail="Informe ao menos um perfil")
+
+        if "unidade_ids" in dados:
+            unidades_alvo = dados.get("unidade_ids") or [None]
+        else:
+            unidades_alvo = list({v.unidade_id for v in vinculos_atuais}) or [None]
+
+        db.query(UsuarioUnidadePerfil).filter(
+            UsuarioUnidadePerfil.usuario_id == alvo.id
+        ).delete()
+
+        for perfil_id in perfis_alvo:
+            for uid in unidades_alvo:
+                db.add(
+                    UsuarioUnidadePerfil(
+                        usuario_id=alvo.id,
+                        unidade_id=uid,
+                        perfil_id=perfil_id,
+                        concedido_por=atual.id,
+                    )
+                )
+
+    db.commit()
+    db.refresh(alvo)
+    return {"id": alvo.id, "email": alvo.email, "nome_completo": alvo.nome_completo}
+
+
+@router.get("/api/ente", response_model=EnteOut)
+def obter_ente(
+    db: Session = Depends(get_db),
+    usuario: Usuario = Depends(get_usuario_atual),
+):
+    tenant = db.get(Tenant, usuario.tenant_id)
+    if not tenant:
+        raise HTTPException(status_code=404, detail="Ente não encontrado")
+    return tenant
+
+
+@router.put("/api/ente", response_model=EnteOut)
+def atualizar_ente(
+    req: EnteUpdate,
+    db: Session = Depends(get_db),
+    usuario: Usuario = Depends(get_usuario_atual),
+):
+    tenant = db.get(Tenant, usuario.tenant_id)
+    if not tenant:
+        raise HTTPException(status_code=404, detail="Ente não encontrado")
+
+    dados = req.model_dump(exclude_unset=True)
+
+    if dados.get("cnpj_ente"):
+        outro = (
+            db.query(Tenant)
+            .filter(Tenant.cnpj_ente == dados["cnpj_ente"], Tenant.id != tenant.id)
+            .first()
+        )
+        if outro:
+            raise HTTPException(status_code=400, detail="CNPJ já cadastrado por outro ente")
+
+    inicio = dados.get("data_inicio_processo", tenant.data_inicio_processo)
+    fim = dados.get("data_fim_processo", tenant.data_fim_processo)
+    if inicio and fim and fim < inicio:
+        raise HTTPException(
+            status_code=400,
+            detail="A data fim do processo não pode ser anterior à data de início",
+        )
+
+    for campo, valor in dados.items():
+        setattr(tenant, campo, valor)
+
+    db.commit()
+    db.refresh(tenant)
+    return tenant
 
 
 @router.get("/api/perfis")
@@ -210,3 +352,52 @@ def criar_unidade(
     db.commit()
     db.refresh(nova)
     return {"id": nova.id, "sigla": nova.sigla, "nome": nova.nome}
+
+
+@router.put("/api/unidades/{unidade_id}")
+def atualizar_unidade(
+    unidade_id: str,
+    req: UnidadeUpdate,
+    db: Session = Depends(get_db),
+    atual: Usuario = Depends(get_usuario_atual),
+):
+    unidade = (
+        db.query(Unidade)
+        .filter(Unidade.id == unidade_id, Unidade.tenant_id == atual.tenant_id)
+        .first()
+    )
+    if not unidade:
+        raise HTTPException(status_code=404, detail="Unidade não encontrada")
+
+    dados = req.model_dump(exclude_unset=True)
+
+    if dados.get("sigla"):
+        sigla = dados["sigla"].upper()
+        existe = (
+            db.query(Unidade)
+            .filter(
+                Unidade.tenant_id == atual.tenant_id,
+                Unidade.sigla == sigla,
+                Unidade.id != unidade.id,
+            )
+            .first()
+        )
+        if existe:
+            raise HTTPException(status_code=400, detail="Sigla já utilizada neste ente")
+        unidade.sigla = sigla
+
+    if "nome" in dados and dados["nome"]:
+        unidade.nome = dados["nome"]
+    if "descricao" in dados:
+        unidade.descricao = dados["descricao"]
+    if "ativo" in dados and dados["ativo"] is not None:
+        unidade.ativo = dados["ativo"]
+
+    db.commit()
+    db.refresh(unidade)
+    return {
+        "id": unidade.id,
+        "sigla": unidade.sigla,
+        "nome": unidade.nome,
+        "descricao": unidade.descricao,
+    }
