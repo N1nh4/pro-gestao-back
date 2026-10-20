@@ -14,7 +14,8 @@ class RequisitoOut(BaseModel):
 
 
 class AcaoCreate(BaseModel):
-    requisito_cod: str
+    id_requisito: int | None = None
+    requisito_cod: str | None = None  # legado; usado quando id_requisito não é informado
     item: str
     descricao_acao: str
     prazo: date
@@ -30,7 +31,7 @@ class AcaoOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id_acao: str
-    requisito_cod: str
+    requisito_id: int
     item: str
     descricao_acao: str
     unidade_id: str

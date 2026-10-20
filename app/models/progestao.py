@@ -1,10 +1,9 @@
-"""Pró-Gestão: requisitos, plano de ação, diligências e documentos."""
+"""Pró-Gestão: manual/dimensões/requisitos/itens, plano de ação e diligências."""
 
 from datetime import datetime
 
 from sqlalchemy import (
     BigInteger,
-    Boolean,
     Column,
     Date,
     DateTime,
@@ -12,34 +11,88 @@ from sqlalchemy import (
     Integer,
     String,
     Text,
+    UniqueConstraint,
 )
 from sqlalchemy.orm import relationship
 
 from app.db.base import Base, gen_uuid
 
 
+class Manual(Base):
+    """Manual do Pró-Gestão RPPS — um registro por versão publicada."""
+
+    __tablename__ = "manual"
+
+    id_manual = Column(Integer, primary_key=True)
+    nome_manual = Column(String(200), nullable=False)
+    versao_manual = Column(String(20), nullable=False, unique=True)
+
+    requisitos = relationship("Requisito", back_populates="manual")
+
+
+class Dimensao(Base):
+    """Dimensões do manual (Controles Internos, Governança, Educação Previdenciária)."""
+
+    __tablename__ = "dimensao"
+
+    id_dimensao = Column(Integer, primary_key=True)
+    nome_dimensao = Column(String(150), nullable=False, unique=True)
+
+    requisitos = relationship("Requisito", back_populates="dimensao")
+
+
 class Requisito(Base):
-    __tablename__ = "requisitos"
+    """Requisito do manual, ligado a uma versão e a uma dimensão."""
 
-    cod = Column(String(10), primary_key=True)
-    dimensao = Column(String(5), nullable=False)  # CI | GC | EP
-    titulo = Column(String(200), nullable=False)
-    descricao_nivel_i = Column(Text)
-    descricao_nivel_ii = Column(Text)
-    descricao_nivel_iii = Column(Text)
-    descricao_nivel_iv = Column(Text)
-    essencial = Column(Boolean, default=False)
-    documentos_exigidos = Column(Text)
-    nivel_minimo = Column(String(5))
+    __tablename__ = "requisito"
+    __table_args__ = (
+        UniqueConstraint("id_manual", "cod_requisito", name="uq_requisito_manual_cod"),
+    )
 
+    id_requisito = Column(Integer, primary_key=True)
+    id_manual = Column(
+        Integer, ForeignKey("manual.id_manual", ondelete="RESTRICT"), nullable=False
+    )
+    id_dimensao = Column(
+        Integer, ForeignKey("dimensao.id_dimensao", ondelete="RESTRICT"), nullable=False
+    )
+    cod_requisito = Column(String(10), nullable=False)
+    nome_requisito = Column(String(200), nullable=False)
+
+    manual = relationship("Manual", back_populates="requisitos")
+    dimensao = relationship("Dimensao", back_populates="requisitos")
+    itens = relationship("Item", back_populates="requisito", cascade="all, delete-orphan")
     acoes = relationship("Acao", back_populates="requisito")
     unidades_vinc = relationship("RequisitoUnidade", back_populates="requisito")
+
+
+class Item(Base):
+    """Item exigido por requisito em cada nível de certificação (I–IV)."""
+
+    __tablename__ = "item"
+    __table_args__ = (
+        UniqueConstraint(
+            "id_requisito", "nivel", "nome_item", name="uq_item_req_nivel_nome"
+        ),
+    )
+
+    id_item = Column(Integer, primary_key=True)
+    id_requisito = Column(
+        Integer, ForeignKey("requisito.id_requisito", ondelete="CASCADE"), nullable=False
+    )
+    nome_item = Column(String(300), nullable=False)
+    nivel = Column(String(3), nullable=False)  # I | II | III | IV
+    descricao = Column(Text)
+
+    requisito = relationship("Requisito", back_populates="itens")
 
 
 class RequisitoUnidade(Base):
     __tablename__ = "requisito_unidade"
 
-    requisito_cod = Column(String(10), ForeignKey("requisitos.cod"), primary_key=True)
+    requisito_id = Column(
+        Integer, ForeignKey("requisito.id_requisito"), primary_key=True
+    )
     unidade_id = Column(String(36), ForeignKey("unidades.id"), primary_key=True)
 
     requisito = relationship("Requisito", back_populates="unidades_vinc")
@@ -51,7 +104,9 @@ class Acao(Base):
 
     id_acao = Column(String(10), primary_key=True)
     tenant_id = Column(String(36), ForeignKey("tenants.id"), nullable=False)
-    requisito_cod = Column(String(10), ForeignKey("requisitos.cod"), nullable=False)
+    requisito_id = Column(
+        Integer, ForeignKey("requisito.id_requisito"), nullable=False
+    )
     item = Column(String(200), nullable=False)
     descricao_acao = Column(Text, nullable=False)
     unidade_id = Column(String(36), ForeignKey("unidades.id"), nullable=False)

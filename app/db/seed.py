@@ -1,19 +1,26 @@
-"""Popula o banco com os dados demo do FUMPRES.
+"""Cria a estrutura base do banco (tenant, perfis, páginas, usuários).
 
-Uso: python -m app.db.seed
+Uso:
+    python -m app.db.seed           # só estrutura base (banco vazio de negócio)
+    python -m app.db.seed --demo    # estrutura base + dados demo do FUMPRES
 """
 
+import sys
 from datetime import date
 
 from app.core.security import hash_senha
 from app.db.base import Base, SessionLocal, engine
 
 # Importa os modelos para registrar no metadata antes do create_all.
+from app.db.catalogo_itens import ITENS_POR_REQUISITO
 from app.models import (  # noqa: F401
     Acao,
     Certificacao,
     Diligencia,
+    Dimensao,
     Evidencia,
+    Item,
+    Manual,
     Pagina,
     Perfil,
     PerfilPagina,
@@ -30,7 +37,7 @@ from app.models import (  # noqa: F401
 SENHA_DEMO = "Demo@2026!"
 
 
-def seed() -> None:
+def seed(demo: bool = False) -> None:
     Base.metadata.create_all(bind=engine)
     db = SessionLocal()
     try:
@@ -38,7 +45,7 @@ def seed() -> None:
             print("✓ Banco já populado. Pulando seed.")
             return
 
-        print("⏳ Populando banco de dados...")
+        print("⏳ Populando banco de dados (estrutura base)...")
 
         # ── TENANT ────────────────────────────────────────────────
         tenant = Tenant(
@@ -160,6 +167,103 @@ def seed() -> None:
             )
         db.flush()
 
+        # ── VÍNCULOS USUARIO-PERFIL (estrutura base) ──────────────
+        vinculos_base = [
+            ("u001", "pf01"),
+            ("u002", "pf02"),
+            ("u002", "pf05"),
+            ("u003", "pf03"),
+            ("u004", "pf04"),
+        ]
+        for uid, pid in vinculos_base:
+            db.add(
+                UsuarioUnidadePerfil(
+                    usuario_id=uid, unidade_id=None, perfil_id=pid, concedido_por="u001"
+                )
+            )
+        db.flush()
+
+        # ── MANUAL 4.1 + DIMENSÕES + REQUISITOS + ITENS ───────────
+        # Catálogo de referência (vale para todo tenant), não dado de negócio.
+        # A tabela `requisito` guarda só os IDs (manual/dimensão); o nome da
+        # dimensão e do manual vêm por JOIN. Itens por nível (I–IV) saem de
+        # `app.db.catalogo_itens`.
+        manual = Manual(
+            nome_manual="Manual do Pró-Gestão RPPS",
+            versao_manual="4.1",
+        )
+        db.add(manual)
+        db.flush()
+
+        dims = {
+            "3.1": Dimensao(nome_dimensao="Controles Internos"),
+            "3.2": Dimensao(nome_dimensao="Governança Corporativa"),
+            "3.3": Dimensao(nome_dimensao="Educação Previdenciária"),
+        }
+        for d in dims.values():
+            db.add(d)
+        db.flush()
+
+        # (cod, nome_requisito, essencial) — a dimensão sai do prefixo do cod.
+        reqs_data = [
+            ("3.1.1", "Mapeamento das Atividades das Áreas", True),
+            ("3.1.2", "Capacitação dos Responsáveis pelas Áreas", True),
+            ("3.1.3", "Certificação dos Dirigentes e Membros dos Conselhos", True),
+            ("3.1.4", "Plano de Capacitação dos Responsáveis", False),
+            ("3.1.5", "Adesão ao CADPREV", True),
+            ("3.1.6", "Implantação de Controles Internos", True),
+            ("3.2.1", "Definição da Política de Investimentos", True),
+            ("3.2.2", "Planejamento Estratégico", True),
+            ("3.2.3", "Comitê de Investimentos", False),
+            ("3.2.4", "Alienação de Bens e Direitos", False),
+            ("3.2.5", "Instâncias de Deliberação", True),
+            ("3.2.6", "Reuniões dos Conselhos", True),
+            ("3.2.7", "Código de Ética e Conduta", False),
+            ("3.2.8", "Transparência e Publicidade", True),
+            ("3.2.9", "Canal de Denúncias", False),
+            ("3.2.10", "Gestão de Riscos", False),
+            ("3.2.11", "Relatório de Gestão", True),
+            ("3.2.12", "Auditoria Interna", False),
+            ("3.2.13", "Normas Internas", False),
+            ("3.2.14", "Segregação de Funções", False),
+            ("3.2.15", "Gestão de Pessoas", False),
+            ("3.2.16", "Tecnologia da Informação", False),
+            ("3.3.1", "Plano de Ação de Educação Previdenciária", True),
+            ("3.3.2", "Programa de Educação Previdenciária", False),
+        ]
+        req_id_por_cod: dict[str, int] = {}
+        for cod, nome, _ess in reqs_data:
+            req = Requisito(
+                id_manual=manual.id_manual,
+                id_dimensao=dims[cod.rsplit(".", 1)[0]].id_dimensao,
+                cod_requisito=cod,
+                nome_requisito=nome,
+            )
+            db.add(req)
+            db.flush()
+            req_id_por_cod[cod] = req.id_requisito
+
+        for cod, itens in ITENS_POR_REQUISITO.items():
+            rid = req_id_por_cod.get(cod)
+            if rid is None:
+                continue
+            for nivel, nome_item, descricao in itens:
+                db.add(
+                    Item(
+                        id_requisito=rid,
+                        nome_item=nome_item,
+                        nivel=nivel,
+                        descricao=descricao,
+                    )
+                )
+        db.flush()
+
+        if not demo:
+            db.commit()
+            print("✅ Estrutura base criada (sem dados de negócio).")
+            print_credenciais()
+            return
+
         # ── UNIDADES ──────────────────────────────────────────────
         unidades_data = [
             ("un01", "DPR", "Diretoria de Previdência"),
@@ -178,6 +282,8 @@ def seed() -> None:
         db.flush()
 
         # ── VÍNCULOS USUARIO-UNIDADE-PERFIL ───────────────────────
+        db.query(UsuarioUnidadePerfil).delete()
+        db.flush()
         vinculos = [
             ("u001", None, "pf01"),
             ("u002", None, "pf02"),
@@ -193,37 +299,6 @@ def seed() -> None:
             )
         db.flush()
 
-        # ── REQUISITOS (24 do Manual MPS/PREVIC v4.1) ─────────────
-        reqs_data = [
-            ("3.1.1", "CI", "Mapeamento das Atividades das Áreas", True),
-            ("3.1.2", "CI", "Capacitação dos Responsáveis pelas Áreas", True),
-            ("3.1.3", "CI", "Certificação dos Dirigentes e Membros dos Conselhos", True),
-            ("3.1.4", "CI", "Plano de Capacitação dos Responsáveis", False),
-            ("3.1.5", "CI", "Adesão ao CADPREV", True),
-            ("3.1.6", "CI", "Implantação de Controles Internos", True),
-            ("3.2.1", "GC", "Definição da Política de Investimentos", True),
-            ("3.2.2", "GC", "Planejamento Estratégico", True),
-            ("3.2.3", "GC", "Comitê de Investimentos", False),
-            ("3.2.4", "GC", "Alienação de Bens e Direitos", False),
-            ("3.2.5", "GC", "Instâncias de Deliberação", True),
-            ("3.2.6", "GC", "Reuniões dos Conselhos", True),
-            ("3.2.7", "GC", "Código de Ética e Conduta", False),
-            ("3.2.8", "GC", "Transparência e Publicidade", True),
-            ("3.2.9", "GC", "Canal de Denúncias", False),
-            ("3.2.10", "GC", "Gestão de Riscos", False),
-            ("3.2.11", "GC", "Relatório de Gestão", True),
-            ("3.2.12", "GC", "Auditoria Interna", False),
-            ("3.2.13", "GC", "Normas Internas", False),
-            ("3.2.14", "GC", "Segregação de Funções", False),
-            ("3.2.15", "GC", "Gestão de Pessoas", False),
-            ("3.2.16", "GC", "Tecnologia da Informação", False),
-            ("3.3.1", "EP", "Plano de Ação de Educação Previdenciária", True),
-            ("3.3.2", "EP", "Programa de Educação Previdenciária", False),
-        ]
-        for cod, dim, titulo, ess in reqs_data:
-            db.add(Requisito(cod=cod, dimensao=dim, titulo=titulo, essencial=ess))
-        db.flush()
-
         req_unid_map = {
             "3.1.1": ["un01", "un04", "un05", "un02", "un10", "un07", "un08"],
             "3.1.3": ["un01", "un08"],
@@ -233,7 +308,11 @@ def seed() -> None:
         }
         for req_cod, uids in req_unid_map.items():
             for uid in uids:
-                db.add(RequisitoUnidade(requisito_cod=req_cod, unidade_id=uid))
+                db.add(
+                    RequisitoUnidade(
+                        requisito_id=req_id_por_cod[req_cod], unidade_id=uid
+                    )
+                )
         db.flush()
 
         # ── AÇÕES (Plano de Ação) ─────────────────────────────────
@@ -264,7 +343,7 @@ def seed() -> None:
                 Acao(
                     id_acao=id_acao,
                     tenant_id=tenant.id,
-                    requisito_cod=req,
+                    requisito_id=req_id_por_cod[req],
                     item=item,
                     descricao_acao=desc,
                     unidade_id=unid,
@@ -354,12 +433,13 @@ def seed() -> None:
             )
 
         # ── EVIDÊNCIAS DEMO ───────────────────────────────────────
+        # Cada evidência aponta para um requisito real do catálogo (por ID).
         evidencias_demo = [
-            ("Política de Investimentos 2026", "politica", "1.1", "Politica_Invest_2026.pdf", 1240000),
-            ("Ata CC Setembro 2026", "ata", "2.1", "Ata_CC_Set2026.pdf", 380000),
-            ("Relatório de Compliance Q2 2026", "relatorio", "1.3", "Compliance_Q2_2026.pdf", 870000),
-            ("Certificado Capacita RPPS 2025", "comprovante", "3.1", "Certif_Capacita2025.pdf", 215000),
-            ("Mapa de Riscos 2026", "relatorio", "1.4", "MapaRiscos_2026.xlsx", 520000),
+            ("Política de Investimentos 2026", "politica", "3.2.1", "Politica_Invest_2026.pdf", 1240000),
+            ("Ata CC Setembro 2026", "ata", "3.2.6", "Ata_CC_Set2026.pdf", 380000),
+            ("Relatório de Compliance Q2 2026", "relatorio", "3.2.11", "Compliance_Q2_2026.pdf", 870000),
+            ("Certificado Capacita RPPS 2025", "comprovante", "3.3.1", "Certif_Capacita2025.pdf", 215000),
+            ("Mapa de Riscos 2026", "relatorio", "3.2.10", "MapaRiscos_2026.xlsx", 520000),
         ]
         for titulo, tipo, req, arq, tam in evidencias_demo:
             db.add(
@@ -367,7 +447,7 @@ def seed() -> None:
                     tenant_id=tenant.id,
                     titulo=titulo,
                     tipo=tipo,
-                    requisito_cod=req,
+                    requisito_id=req_id_por_cod.get(req),
                     arquivo_nome=arq,
                     arquivo_tamanho=tam,
                     data_referencia=date(2026, 9, 1),
@@ -377,11 +457,7 @@ def seed() -> None:
 
         db.commit()
         print("✅ Banco populado com sucesso!")
-        print("\n📋 Credenciais de acesso (senha: Demo@2026!):")
-        print("   Admin Master   → admin@fumpres.ba.gov.br")
-        print("   Admin do Ente  → auditor@fumpres.ba.gov.br")
-        print("   Operador       → operador@fumpres.ba.gov.br")
-        print("   Visualizador   → viewer@previc.gov.br")
+        print_credenciais()
 
     except Exception as exc:
         db.rollback()
@@ -391,5 +467,13 @@ def seed() -> None:
         db.close()
 
 
+def print_credenciais() -> None:
+    print("\n📋 Credenciais de acesso (senha: Demo@2026!):")
+    print("   Admin Master   → admin@fumpres.ba.gov.br")
+    print("   Admin do Ente  → auditor@fumpres.ba.gov.br")
+    print("   Operador       → operador@fumpres.ba.gov.br")
+    print("   Visualizador   → viewer@previc.gov.br")
+
+
 if __name__ == "__main__":
-    seed()
+    seed(demo="--demo" in sys.argv)

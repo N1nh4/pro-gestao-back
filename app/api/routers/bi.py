@@ -1,11 +1,11 @@
 """BI / Painel analítico consolidado."""
 
 from fastapi import APIRouter, Depends
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
 from app.api.deps import get_usuario_atual
 from app.db import get_db
-from app.models import Acao, Usuario
+from app.models import Acao, Requisito, Usuario
 
 router = APIRouter(prefix="/api/bi", tags=["BI"])
 
@@ -15,7 +15,12 @@ def bi_consolidado(
     db: Session = Depends(get_db),
     usuario: Usuario = Depends(get_usuario_atual),
 ):
-    acoes = db.query(Acao).filter(Acao.tenant_id == usuario.tenant_id).all()
+    acoes = (
+        db.query(Acao)
+        .options(joinedload(Acao.requisito).joinedload(Requisito.dimensao))
+        .filter(Acao.tenant_id == usuario.tenant_id)
+        .all()
+    )
     total = len(acoes)
     aprovadas = sum(1 for a in acoes if a.status == "APROVADO")
     enviadas = sum(1 for a in acoes if a.status == "ENVIADO")
@@ -36,10 +41,11 @@ def bi_consolidado(
 
     reqs: dict[str, dict[str, int]] = {}
     for a in acoes:
-        reqs.setdefault(a.requisito_cod, {"total": 0, "aprovadas": 0})
-        reqs[a.requisito_cod]["total"] += 1
+        cod = a.requisito.cod_requisito if a.requisito else ""
+        reqs.setdefault(cod, {"total": 0, "aprovadas": 0})
+        reqs[cod]["total"] += 1
         if a.status == "APROVADO":
-            reqs[a.requisito_cod]["aprovadas"] += 1
+            reqs[cod]["aprovadas"] += 1
 
     por_req = [
         {"cod": cod, **dados, "pct": round(dados["aprovadas"] / dados["total"] * 100, 1)}
@@ -51,14 +57,12 @@ def bi_consolidado(
         "GC": {"total": 0, "aprovadas": 0},
         "EP": {"total": 0, "aprovadas": 0},
     }
+    prefixo_para_dim = {"3.1": "CI", "3.2": "GC", "3.3": "EP"}
     for a in acoes:
-        if a.requisito_cod.startswith("3.1"):
-            dim = "CI"
-        elif a.requisito_cod.startswith("3.2"):
-            dim = "GC"
-        elif a.requisito_cod.startswith("3.3"):
-            dim = "EP"
-        else:
+        if not a.requisito:
+            continue
+        dim = prefixo_para_dim.get(a.requisito.cod_requisito.rsplit(".", 1)[0])
+        if dim is None:
             continue
         por_dim[dim]["total"] += 1
         if a.status == "APROVADO":

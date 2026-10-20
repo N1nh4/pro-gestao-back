@@ -38,8 +38,9 @@ cp .env.example .env
 # 3. (opcional) Subir Postgres + Redis
 docker compose -f docker-compose.dev.yml up -d
 
-# 4. Criar as tabelas e popular os dados demo
-poetry run python -m app.db.seed
+# 4. Criar as tabelas (estrutura base) e, opcionalmente, dados demo
+poetry run python -m app.db.seed          # só base: tenant, perfis, páginas, usuários
+poetry run python -m app.db.seed --demo   # + unidades, requisitos, ações, diligências
 
 # 5. Subir a API
 poetry run uvicorn app.main:app --reload --port 8000

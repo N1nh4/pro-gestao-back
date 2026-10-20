@@ -4,7 +4,7 @@ from datetime import date
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import func
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
 from app.api.deps import get_usuario_atual, nomes_perfis
 from app.db import get_db
@@ -12,6 +12,7 @@ from app.models import (
     Acao,
     Diligencia,
     HistoricoAcao,
+    Requisito,
     Unidade,
     Usuario,
     UsuarioUnidadePerfil,
@@ -22,6 +23,23 @@ router = APIRouter(prefix="/api/acoes", tags=["Plano de Ação"])
 
 _PERFIS_ADMIN = {"Admin do Ente", "Admin Master"}
 _PREFIXO_DIMENSAO = {"CI": "3.1", "GC": "3.2", "EP": "3.3"}
+
+
+def _resolver_requisito(db: Session, *, id_requisito: int | None, cod: str | None) -> Requisito:
+    """Resolve o requisito por ID (preferencial) ou por código legado."""
+    if id_requisito is not None:
+        req = db.get(Requisito, id_requisito)
+        if not req:
+            raise HTTPException(status_code=422, detail="Requisito não encontrado")
+        return req
+    if cod:
+        req = (
+            db.query(Requisito).filter(Requisito.cod_requisito == cod).first()
+        )
+        if not req:
+            raise HTTPException(status_code=422, detail="Requisito não encontrado")
+        return req
+    raise HTTPException(status_code=422, detail="Informe id_requisito ou requisito_cod")
 
 
 @router.get("")
@@ -52,13 +70,21 @@ def listar_acoes(
     if unidade_id:
         q = q.filter(Acao.unidade_id == unidade_id)
     if requisito:
-        q = q.filter(Acao.requisito_cod == requisito)
+        q = q.join(Requisito, Requisito.id_requisito == Acao.requisito_id).filter(
+            Requisito.cod_requisito == requisito
+        )
     if dimensao:
         prefix = _PREFIXO_DIMENSAO.get(dimensao, "")
         if prefix:
-            q = q.filter(Acao.requisito_cod.like(f"{prefix}%"))
+            q = q.join(Requisito, Requisito.id_requisito == Acao.requisito_id).filter(
+                Requisito.cod_requisito.like(f"{prefix}%")
+            )
 
-    acoes = q.order_by(Acao.requisito_cod, Acao.id_acao).all()
+    acoes = (
+        q.options(joinedload(Acao.requisito))
+        .order_by(Acao.requisito_id, Acao.id_acao)
+        .all()
+    )
 
     result = []
     for a in acoes:
@@ -78,7 +104,8 @@ def listar_acoes(
         result.append(
             {
                 "id_acao": a.id_acao,
-                "requisito_cod": a.requisito_cod,
+                "id_requisito": a.requisito_id,
+                "requisito_cod": a.requisito.cod_requisito if a.requisito else "",
                 "item": a.item,
                 "descricao_acao": a.descricao_acao,
                 "unidade_id": a.unidade_id,
@@ -110,6 +137,10 @@ def criar_acao(
     if not alvos:
         raise HTTPException(status_code=422, detail="Informe ao menos uma unidade")
 
+    requisito = _resolver_requisito(
+        db, id_requisito=req.id_requisito, cod=req.requisito_cod
+    )
+
     criadas = []
     total = (
         db.query(func.count(Acao.id_acao))
@@ -128,7 +159,7 @@ def criar_acao(
             Acao(
                 id_acao=id_acao,
                 tenant_id=atual.tenant_id,
-                requisito_cod=req.requisito_cod,
+                requisito_id=requisito.id_requisito,
                 item=req.item,
                 descricao_acao=req.descricao_acao,
                 unidade_id=uid,

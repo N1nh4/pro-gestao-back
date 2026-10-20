@@ -23,7 +23,8 @@ def client():
     from app.db.seed import seed
     from app.main import app
 
-    seed()
+    # Testes cobrem o dataset completo (demo), não só a estrutura base.
+    seed(demo=True)
     with TestClient(app) as test_client:
         yield test_client
 

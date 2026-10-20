@@ -5,9 +5,12 @@ from app.models.ged import Evidencia, Tarefa
 from app.models.progestao import (
     Acao,
     Diligencia,
+    Dimensao,
     Documento,
     HistoricoAcao,
     HistoricoDiligencia,
+    Item,
+    Manual,
     MensagemDiligencia,
     PrazoExtensao,
     Requisito,
@@ -35,7 +38,10 @@ __all__ = [
     "Unidade",
     "UsuarioUnidadePerfil",
     # progestão
+    "Manual",
+    "Dimensao",
     "Requisito",
+    "Item",
     "RequisitoUnidade",
     "Acao",
     "HistoricoAcao",

@@ -41,7 +41,7 @@ class Evidencia(Base):
     tenant_id = Column(String(36), ForeignKey("tenants.id"), nullable=False)
     titulo = Column(String(300), nullable=False)
     tipo = Column(String(50))  # ata|relatorio|comprovante|politica|outro
-    requisito_cod = Column(String(20))
+    requisito_id = Column(Integer, ForeignKey("requisito.id_requisito"))
     acao_id = Column(String(10))  # referência informacional à acoes.id_acao
     arquivo_nome = Column(String(300))
     arquivo_path = Column(String(500))

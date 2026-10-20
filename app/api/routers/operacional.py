@@ -3,13 +3,14 @@
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
 from app.api.deps import get_usuario_atual
 from app.db import get_db
 from app.models import (
     Evidencia,
     ProcessoProgestao,
+    Requisito,
     Tarefa,
     Tenant,
     Usuario,
@@ -99,6 +100,7 @@ def listar_evidencias(
 ):
     rows = (
         db.query(Evidencia)
+        .options(joinedload(Evidencia.requisito))
         .filter(Evidencia.tenant_id == usuario.tenant_id)
         .order_by(Evidencia.criado_em.desc())
         .all()
@@ -108,7 +110,8 @@ def listar_evidencias(
             "id": r.id,
             "titulo": r.titulo,
             "tipo": r.tipo,
-            "requisito_cod": r.requisito_cod,
+            "id_requisito": r.requisito_id,
+            "requisito_cod": r.requisito.cod_requisito if r.requisito else None,
             "acao_id": r.acao_id,
             "arquivo_nome": r.arquivo_nome,
             "arquivo_tamanho": r.arquivo_tamanho,
@@ -126,10 +129,20 @@ def enviar_evidencia(
     db: Session = Depends(get_db),
     usuario: Usuario = Depends(get_usuario_atual),
 ):
+    dados = payload.model_dump()
+    cod_legado = dados.pop("requisito_cod", None)
+    requisito_id = dados.pop("id_requisito", None)
+
+    # Resolve o requisito por ID (preferencial) ou pelo código legado.
+    if requisito_id is None and cod_legado:
+        req = db.query(Requisito).filter(Requisito.cod_requisito == cod_legado).first()
+        requisito_id = req.id_requisito if req else None
+    dados["requisito_id"] = requisito_id
+
     evidencia = Evidencia(
         tenant_id=usuario.tenant_id,
         enviado_por=usuario.id,
-        **payload.model_dump(),
+        **dados,
     )
     db.add(evidencia)
     db.commit()

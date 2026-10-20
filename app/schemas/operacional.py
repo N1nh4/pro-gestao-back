@@ -21,7 +21,8 @@ class TarefaStatusUpdate(BaseModel):
 class EvidenciaCreate(BaseModel):
     titulo: str
     tipo: str = "outro"
-    requisito_cod: str | None = None
+    id_requisito: int | None = None
+    requisito_cod: str | None = None  # legado; usado quando id_requisito não é informado
     acao_id: str | None = None
     observacoes: str | None = None
 
