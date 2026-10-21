@@ -8,6 +8,7 @@ from sqlalchemy import (
     Date,
     DateTime,
     ForeignKey,
+    ForeignKeyConstraint,
     Integer,
     String,
     Text,
@@ -28,6 +29,7 @@ class Manual(Base):
     versao_manual = Column(String(20), nullable=False, unique=True)
 
     requisitos = relationship("Requisito", back_populates="manual")
+    certificacoes = relationship("Certificacao", back_populates="manual")
 
 
 class Dimensao(Base):
@@ -74,6 +76,7 @@ class Item(Base):
         UniqueConstraint(
             "id_requisito", "nivel", "nome_item", name="uq_item_req_nivel_nome"
         ),
+        UniqueConstraint("id_item", "id_requisito", name="uq_item_id_req"),
     )
 
     id_item = Column(Integer, primary_key=True)
@@ -85,6 +88,14 @@ class Item(Base):
     descricao = Column(Text)
 
     requisito = relationship("Requisito", back_populates="itens")
+    # A FK composta (id_item, id_requisito) compartilha id_requisito com
+    # Requisito.acoes — por isso a relação é somente leitura: quem
+    # escreve id_item/id_requisito são os atributos escalares.
+    acoes = relationship(
+        "Acao",
+        back_populates="item",
+        viewonly=True,
+    )
 
 
 class RequisitoUnidade(Base):
@@ -100,26 +111,43 @@ class RequisitoUnidade(Base):
 
 
 class Acao(Base):
-    __tablename__ = "acoes"
+    """Ação do plano: requisito, item, unidade, prazo e status — tudo por ID.
 
-    id_acao = Column(String(10), primary_key=True)
+    Tabela única: a ação e o seu plano (o que precisa ser feito, por quem,
+    até quando e em que situação) são o mesmo registro.
+    """
+
+    __tablename__ = "acao"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["id_item", "id_requisito"],
+            ["item.id_item", "item.id_requisito"],
+            name="fk_acao_item",
+        ),
+    )
+
+    id_acao = Column(Integer, primary_key=True, autoincrement=True)
     tenant_id = Column(String(36), ForeignKey("tenants.id"), nullable=False)
-    requisito_id = Column(
+    id_certificacao = Column(
+        Integer, ForeignKey("certificacao.id_certificacao"), nullable=False
+    )
+    id_requisito = Column(
         Integer, ForeignKey("requisito.id_requisito"), nullable=False
     )
-    item = Column(String(200), nullable=False)
-    descricao_acao = Column(Text, nullable=False)
-    unidade_id = Column(String(36), ForeignKey("unidades.id"), nullable=False)
-    status = Column(String(20), default="PENDENTE")  # PENDENTE|ENVIADO|APROVADO|DILIGÊNCIA
+    id_item = Column(Integer)
+    id_unidade = Column(String(36), ForeignKey("unidades.id"), nullable=False)
+    nome = Column(String(300), nullable=False)
+    descricao = Column(Text, nullable=False)
     prazo = Column(Date, nullable=False)
-    dt_envio = Column(Date)
-    dt_aprovacao = Column(Date)
-    observacao = Column(Text)
+    data_envio = Column(Date)
+    status = Column(String(20), nullable=False, default="PENDENTE")
+    data_aprovacao = Column(Date)
     criado_por = Column(String(36), ForeignKey("usuarios.id"))
     criado_em = Column(DateTime, default=datetime.utcnow)
     atualizado_em = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     tenant = relationship("Tenant", back_populates="acoes")
+    certificacao = relationship("Certificacao", back_populates="acoes")
     requisito = relationship("Requisito", back_populates="acoes")
     unidade = relationship("Unidade", back_populates="acoes")
     criado_por_usuario = relationship(
@@ -128,13 +156,15 @@ class Acao(Base):
     historico = relationship("HistoricoAcao", back_populates="acao", cascade="all, delete-orphan")
     diligencias = relationship("Diligencia", back_populates="acao", cascade="all, delete-orphan")
     documentos = relationship("Documento", back_populates="acao", cascade="all, delete-orphan")
+    # FK composta (id_item, id_requisito) — relação somente leitura.
+    item = relationship("Item", back_populates="acoes", viewonly=True)
 
 
 class HistoricoAcao(Base):
     __tablename__ = "historico_acoes"
 
     id = Column(String(36), primary_key=True, default=gen_uuid)
-    acao_id = Column(String(10), ForeignKey("acoes.id_acao"), nullable=False)
+    acao_id = Column(Integer, ForeignKey("acao.id_acao"), nullable=False)
     descricao_evento = Column(Text, nullable=False)
     usuario_id = Column(String(36), ForeignKey("usuarios.id"))
     data_evento = Column(DateTime, default=datetime.utcnow)
@@ -147,7 +177,7 @@ class Diligencia(Base):
 
     id = Column(String(36), primary_key=True, default=gen_uuid)
     num = Column(String(10), nullable=False)
-    acao_id = Column(String(10), ForeignKey("acoes.id_acao"), nullable=False)
+    acao_id = Column(Integer, ForeignKey("acao.id_acao"), nullable=False)
     situacao_detectada = Column(Text, nullable=False)
     criticidade = Column(String(10), default="media")
     prazo_resposta = Column(Date, nullable=False)
@@ -215,7 +245,7 @@ class Documento(Base):
     __tablename__ = "documentos"
 
     id = Column(String(36), primary_key=True, default=gen_uuid)
-    acao_id = Column(String(10), ForeignKey("acoes.id_acao"), nullable=False)
+    acao_id = Column(Integer, ForeignKey("acao.id_acao"), nullable=False)
     diligencia_id = Column(String(36), ForeignKey("diligencias.id"))
     nome_arquivo = Column(String(300), nullable=False)
     tipo_arquivo = Column(String(10), nullable=False)

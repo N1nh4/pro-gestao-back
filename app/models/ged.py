@@ -24,7 +24,7 @@ class Tarefa(Base):
     descricao = Column(Text)
     responsavel_id = Column(String(36), ForeignKey("usuarios.id"))
     unidade_id = Column(String(36), ForeignKey("unidades.id"))
-    acao_id = Column(String(10))  # referência informacional à acoes.id_acao
+    acao_id = Column(Integer)  # referência informacional à acao.id_acao
     prioridade = Column(String(10), default="media")  # baixa|media|alta|critica
     status = Column(String(20), default="pendente")  # pendente|em_andamento|concluida|cancelada
     prazo = Column(Date)
@@ -42,7 +42,7 @@ class Evidencia(Base):
     titulo = Column(String(300), nullable=False)
     tipo = Column(String(50))  # ata|relatorio|comprovante|politica|outro
     requisito_id = Column(Integer, ForeignKey("requisito.id_requisito"))
-    acao_id = Column(String(10))  # referência informacional à acoes.id_acao
+    acao_id = Column(Integer)  # referência informacional à acao.id_acao
     arquivo_nome = Column(String(300))
     arquivo_path = Column(String(500))
     arquivo_tamanho = Column(Integer)

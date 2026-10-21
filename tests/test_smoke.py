@@ -44,29 +44,45 @@ def test_listar_acoes(client, auth_headers):
     assert len(resp.json()) == 20
 
 
-def test_criar_e_mudar_status_acao(client, auth_headers):
+def test_criar_acao_impede_status_enviado_sem_upload(client, auth_headers):
+    acoes = client.get("/api/acoes", headers=auth_headers).json()
+    base = acoes[0]
+    itens = client.get(
+        "/api/catalogo/itens", headers=auth_headers, params={"id_requisito": base["id_requisito"]}
+    ).json()
+
     create = client.post(
         "/api/acoes",
         headers=auth_headers,
         json={
-            "requisito_cod": "3.1.1",
-            "item": "Benefícios",
-            "descricao_acao": "Ação de teste",
+            "id_requisito": base["id_requisito"],
+            "id_item": itens[0]["id_item"],
+            "nome": "Ação de teste",
+            "descricao": "Ação de teste",
             "prazo": "2026-12-31",
-            "unidade_ids": ["un01", "un04"],
+            "unidade_ids": [base["id_unidade"], acoes[1]["id_unidade"]],
         },
     )
-    assert create.status_code == 200, create.text
-    criadas = create.json()["criadas"]
+    assert create.status_code == 201, create.text
+    criadas = create.json()
     assert len(criadas) == 2
+    assert criadas[0]["id_acao"] != criadas[1]["id_acao"]
 
     patch = client.patch(
-        f"/api/acoes/{criadas[0]}/status",
+        f"/api/acoes/{criadas[0]['id_acao']}/status",
         headers=auth_headers,
         json={"status": "ENVIADO"},
     )
-    assert patch.status_code == 200
-    assert patch.json()["status"] == "ENVIADO"
+    assert patch.status_code == 409
+    assert client.get(f"/api/acoes/{criadas[0]['id_acao']}", headers=auth_headers).json()[
+        "status"
+    ] == "PENDENTE"
+
+    for criada in criadas:
+        assert (
+            client.delete(f"/api/acoes/{criada['id_acao']}", headers=auth_headers).status_code
+            == 204
+        )
 
 
 def test_bi_consolidado(client, auth_headers):
@@ -80,7 +96,10 @@ def test_bi_consolidado(client, auth_headers):
 def test_certificacoes(client, auth_headers):
     resp = client.get("/api/certificacoes", headers=auth_headers)
     assert resp.status_code == 200
-    assert len(resp.json()) == 1
+    certs = resp.json()
+    # Uma certificação por nível do manual, do ente.
+    assert len(certs) == 4
+    assert {c["nome_nivel"] for c in certs} == {"I", "II", "III", "IV"}
 
 
 def test_criar_auditoria(client, auth_headers):

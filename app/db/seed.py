@@ -19,8 +19,10 @@ from app.models import (  # noqa: F401
     Diligencia,
     Dimensao,
     Evidencia,
+    HistoricoAcao,
     Item,
     Manual,
+    Nivel,
     Pagina,
     Perfil,
     PerfilPagina,
@@ -183,6 +185,15 @@ def seed(demo: bool = False) -> None:
             )
         db.flush()
 
+        # ── NÍVEIS DE CERTIFICAÇÃO (I–IV) ─────────────────────────
+        # Domínio fixo do Pró-Gestão: todo manual oferece um nível de cada vez.
+        niveis: dict[str, Nivel] = {}
+        for nome in ("I", "II", "III", "IV"):
+            nivel = Nivel(nome_nivel=nome)
+            db.add(nivel)
+            niveis[nome] = nivel
+        db.flush()
+
         # ── MANUAL 4.1 + DIMENSÕES + REQUISITOS + ITENS ───────────
         # Catálogo de referência (vale para todo tenant), não dado de negócio.
         # A tabela `requisito` guarda só os IDs (manual/dimensão); o nome da
@@ -193,6 +204,20 @@ def seed(demo: bool = False) -> None:
             versao_manual="4.1",
         )
         db.add(manual)
+        db.flush()
+
+        # Uma certificação por nível, por manual, para este ente.
+        cert_por_nivel: dict[str, Certificacao] = {}
+        for nome, nivel in niveis.items():
+            cert = Certificacao(
+                id_manual=manual.id_manual,
+                id_nivel=nivel.id_nivel,
+                tenant_id=tenant.id,
+                nome_certificacao=f"Certificação Pró-Gestão — Nível {nome}",
+                status="PENDENTE",
+            )
+            db.add(cert)
+            cert_por_nivel[nome] = cert
         db.flush()
 
         dims = {
@@ -258,6 +283,18 @@ def seed(demo: bool = False) -> None:
                 )
         db.flush()
 
+        # Itens de cada requisito (id, nível) — as ações do plano apontam por ID.
+        itens_por_cod: dict[str, list[tuple[int, str]]] = {}
+        for cod, rid in req_id_por_cod.items():
+            itens = (
+                db.query(Item)
+                .filter(Item.id_requisito == rid)
+                .order_by(Item.nivel, Item.id_item)
+                .all()
+            )
+            if itens:
+                itens_por_cod[cod] = [(i.id_item, i.nivel) for i in itens]
+
         if not demo:
             db.commit()
             print("✅ Estrutura base criada (sem dados de negócio).")
@@ -265,18 +302,7 @@ def seed(demo: bool = False) -> None:
             return
 
         # ── UNIDADES ──────────────────────────────────────────────
-        unidades_data = [
-            ("un01", "DPR", "Diretoria de Previdência"),
-            ("un02", "GEPRE", "Gerência de Previdência"),
-            ("un03", "GECOP", "Gerência de Controle e Pagamento"),
-            ("un04", "GEFIN", "Gerência Financeira"),
-            ("un05", "UCGR", "Unidade de Controle e Gestão de Recursos"),
-            ("un06", "GEINP", "Gerência de Informação e Publicidade"),
-            ("un07", "OUVFUMPRES", "Ouvidoria FUMPRES"),
-            ("un08", "GAB DPR", "Gabinete da Diretoria de Previdência"),
-            ("un09", "ASSGER", "Assessoria de Gestão"),
-            ("un10", "SEAPO", "Setor de Apoio ao Segurado"),
-        ]
+        unidades_data = UNIDADES_DEMO
         for uid, sigla, nome in unidades_data:
             db.add(Unidade(id=uid, tenant_id=tenant.id, sigla=sigla, nome=nome, criado_por="u002"))
         db.flush()
@@ -315,59 +341,84 @@ def seed(demo: bool = False) -> None:
                 )
         db.flush()
 
-        # ── AÇÕES (Plano de Ação) ─────────────────────────────────
-        acoes_data = [
-            ("AC-001", "3.1.1", "Benefícios", "Mapeamento documentado do processo de concessão, revisão e manutenção de aposentadorias e pensões", "un01", "PENDENTE", "2026-09-30", None),
-            ("AC-002", "3.1.1", "Arrecadação", "Mapeamento da arrecadação mensal de contribuições e cobrança de débitos previdenciários", "un04", "PENDENTE", "2026-09-30", None),
-            ("AC-003", "3.1.1", "Arrecadação", "Mapeamento da arrecadação mensal de contribuições e cobrança de débitos previdenciários", "un05", "APROVADO", "2026-09-30", "2026-05-15"),
-            ("AC-004", "3.1.1", "Arrecadação", "Mapeamento da arrecadação mensal de contribuições e cobrança de débitos previdenciários", "un02", "ENVIADO", "2026-09-30", "2026-06-10"),
-            ("AC-005", "3.1.1", "Atendimento ao Segurado", "Mapeamento do fluxo de atendimento presencial e remoto aos segurados", "un10", "APROVADO", "2026-09-30", "2026-06-02"),
-            ("AC-006", "3.1.1", "Financeiro e Contábil", "Mapeamento das rotinas financeiras e contabilidade do RPPS", "un04", "APROVADO", "2026-09-30", "2026-06-05"),
-            ("AC-007", "3.1.1", "Concessão e Revisão", "Mapeamento detalhado do fluxo de análise e concessão de benefícios", "un01", "PENDENTE", "2026-09-30", None),
-            ("AC-008", "3.1.1", "Ouvidoria", "Mapeamento dos processos da Ouvidoria e canais de manifestação", "un07", "PENDENTE", "2026-09-30", None),
-            ("AC-011", "3.1.3", "Diretor de Previdência", "Certificação profissional válida do Diretor de Previdência", "un01", "APROVADO", "2026-09-30", "2026-03-10"),
-            ("AC-012", "3.1.3", "Conselho Deliberativo", "Certificação profissional do Presidente do Conselho Deliberativo", "un08", "APROVADO", "2026-09-30", "2026-03-12"),
-            ("AC-013", "3.1.3", "Isabela Loureiro — Gestora", "Certificação da Gestora de Previdência — vencida em mar/2026", "un08", "DILIGÊNCIA", "2026-06-23", "2026-03-01"),
-            ("AC-021", "3.2.2", "Plano Estratégico (5 anos)", "Planejamento Estratégico do RPPS aprovado pelo Conselho Deliberativo", "un01", "APROVADO", "2026-03-31", "2026-01-20"),
-            ("AC-022", "3.2.2", "Plano de Ação Anual", "Plano de Ação Anual 2026 com metas quantitativas e ata de aprovação do CD", "un04", "DILIGÊNCIA", "2026-03-15", "2026-03-01"),
-            ("AC-023", "3.2.2", "Plano Plurianual (PPA)", "PPA do ente federativo vigente com ações do RPPS inseridas", "un01", "PENDENTE", "2026-09-30", None),
-            ("AC-031", "3.2.8", "Balanço Anual", "Balanço anual do RPPS publicado no portal de transparência", "un06", "APROVADO", "2026-06-30", "2026-01-20"),
-            ("AC-032", "3.2.8", "Relatório de Gestão", "Relatório de Gestão anual publicado no portal de transparência", "un06", "APROVADO", "2026-06-30", "2026-01-25"),
-            ("AC-033", "3.2.8", "Demonstrações Mensais", "Demonstrações financeiras mensais jan–jun/2026 publicadas no portal", "un06", "ENVIADO", "2026-07-17", "2026-07-18"),
-            ("AC-041", "3.3.1", "Plano de Capacitação 2026", "Plano de Capacitação dos servidores do RPPS para 2026", "un03", "APROVADO", "2026-09-30", "2026-03-15"),
-            ("AC-042", "3.3.1", "Capacita FUMPRES 2026", "Comprovação de realização e certificados do Capacita FUMPRES 2026", "un03", "PENDENTE", "2026-11-30", None),
-            ("AC-043", "3.3.1", "Certificados Concessão", "Certificados dos servidores da área de concessão em capacitação técnica", "un01", "PENDENTE", "2026-11-30", None),
-        ]
-        for id_acao, req, item, desc, unid, st, prazo, dt_envio in acoes_data:
+        # ── AÇÕES (tabela única `acao`) ───────────────────────────
+        # Tudo por ID: certificação (ente + manual + nível), requisito, item
+        # e unidade. O planejamento (o quê, por quem, até quando) faz parte do
+        # próprio registro da ação.
+        # (chave demo, requisito, nome, descrição, unidade, status, prazo, envio)
+        acoes_data = ACORES_DEMO
+        acao_id_por_chave: dict[str, int] = {}
+        item_por_requisito: dict[str, int] = {}
+        for chave, req, nome, desc, unid, st, prazo, dt_envio in acoes_data:
+            # Cada ação do mesmo requisito aponta para um item diferente
+            # (varia o item real do catálogo, sempre pertencente ao requisito).
+            itens_req = itens_por_cod.get(req, [])
+            pos = item_por_requisito.get(req, 0)
+            item_por_requisito[req] = pos + 1
+            id_item, nivel_item = itens_req[pos % len(itens_req)] if itens_req else (None, None)
+            cert = cert_por_nivel.get(nivel_item) or cert_por_nivel["I"]
+            acao = Acao(
+                tenant_id=tenant.id,
+                id_certificacao=cert.id_certificacao,
+                id_requisito=req_id_por_cod[req],
+                id_item=id_item,
+                id_unidade=unid,
+                nome=nome,
+                descricao=desc,
+                prazo=date.fromisoformat(prazo),
+                data_envio=date.fromisoformat(dt_envio) if dt_envio else None,
+                status=st,
+                data_aprovacao=(
+                    date.fromisoformat(dt_envio) if (dt_envio and st == "APROVADO") else None
+                ),
+                criado_por="u002",
+            )
+            db.add(acao)
+            db.flush()
+            acao_id_por_chave[chave] = acao.id_acao
+
+            # Histórico da ação: criação e, quando aplicável, a evolução
+            # do status até a situação atual.
             db.add(
-                Acao(
-                    id_acao=id_acao,
-                    tenant_id=tenant.id,
-                    requisito_id=req_id_por_cod[req],
-                    item=item,
-                    descricao_acao=desc,
-                    unidade_id=unid,
-                    status=st,
-                    prazo=date.fromisoformat(prazo),
-                    dt_envio=date.fromisoformat(dt_envio) if dt_envio else None,
-                    dt_aprovacao=date.fromisoformat(dt_envio) if (dt_envio and st == "APROVADO") else None,
-                    criado_por="u002",
+                HistoricoAcao(
+                    acao_id=acao.id_acao,
+                    descricao_evento="Ação criada por Alana Abreu (Admin do Ente)",
+                    usuario_id="u002",
                 )
             )
+            if dt_envio:
+                db.add(
+                    HistoricoAcao(
+                        acao_id=acao.id_acao,
+                        descricao_evento="Status alterado: PENDENTE → ENVIADO por Alana Abreu",
+                        usuario_id="u002",
+                    )
+                )
+            if st == "APROVADO":
+                db.add(
+                    HistoricoAcao(
+                        acao_id=acao.id_acao,
+                        descricao_evento="Status alterado: ENVIADO → APROVADO por Alana Abreu",
+                        usuario_id="u002",
+                    )
+                )
+            elif st == "DILIGÊNCIA":
+                db.add(
+                    HistoricoAcao(
+                        acao_id=acao.id_acao,
+                        descricao_evento="Status alterado: ENVIADO → DILIGÊNCIA por Alana Abreu",
+                        usuario_id="u002",
+                    )
+                )
         db.flush()
 
         # ── DILIGÊNCIAS ───────────────────────────────────────────
-        dils_data = [
-            ("D-001", "AC-033", "Demonstrações financeiras mensais ausentes no portal. Publicar jan-jun/2026.", "alta", "2026-07-17", "retorno"),
-            ("D-002", "AC-022", "Plano de Ação Anual 2026 enviado sem ata de aprovação do Conselho Deliberativo.", "critica", "2026-03-15", "vencida"),
-            ("D-003", "AC-013", "Certificação da Gestora vencida em março/2026. Renovação obrigatória para manutenção do Nível IV.", "critica", "2026-06-23", "aberta"),
-            ("D-004", "AC-004", "Mapeamento da compensação previdenciária incompleto — falta fluxograma assinado.", "media", "2026-07-31", "retorno"),
-        ]
-        for num, acao_id, sit, crit, prazo, status_d in dils_data:
+        dils_data = DILIGENCIAS_DEMO
+        for num, chave_acao, sit, crit, prazo, status_d in dils_data:
             db.add(
                 Diligencia(
                     num=num,
-                    acao_id=acao_id,
+                    acao_id=acao_id_por_chave[chave_acao],
                     situacao_detectada=sit,
                     criticidade=crit,
                     prazo_resposta=date.fromisoformat(prazo),
@@ -378,19 +429,13 @@ def seed(demo: bool = False) -> None:
             )
         db.flush()
 
-        # ── CERTIFICAÇÃO ──────────────────────────────────────────
-        db.add(
-            Certificacao(
-                tenant_id=tenant.id,
-                nivel="III",
-                data_certificacao=date(2024, 6, 1),
-                data_validade=date(2026, 6, 1),
-                entidade_certificadora="IEPREV",
-                status="expirada",
-                numero_certificado="CERT-III-2024-0042",
-                registrado_por="u002",
-            )
-        )
+        # ── CERTIFICAÇÃO DO ENTE (nível atual) ────────────────────
+        cert_atual = cert_por_nivel["III"]
+        cert_atual.status = "VENCIDA"
+        cert_atual.numero_certificado = "CERT-III-2024-0042"
+        cert_atual.data_certificacao = date(2024, 6, 1)
+        cert_atual.data_validade = date(2026, 6, 1)
+        cert_atual.entidade_certificadora = "IEPREV"
 
         # ── PROCESSO PRÓ-GESTÃO ───────────────────────────────────
         db.add(
@@ -411,13 +456,7 @@ def seed(demo: bool = False) -> None:
         )
 
         # ── TAREFAS DEMO ──────────────────────────────────────────
-        tarefas_demo = [
-            ("Revisar Política de Controle Interno", "Atualizar conforme manual v4.1", "un01", "alta", "2026-11-15", "pendente"),
-            ("Elaborar Ata da Reunião do CC", "Reunião de outubro/2026", "un02", "media", "2026-10-30", "em_andamento"),
-            ("Enviar comprovante do Capacita 2026", "Certificados de participação", "un03", "alta", "2026-11-30", "pendente"),
-            ("Atualizar mapa de riscos operacionais", "Ciclo anual de revisão", "un04", "critica", "2026-10-20", "em_andamento"),
-            ("Publicar relatório no hotsite", "Relatório de conformidade Q3 2026", "un01", "baixa", "2026-11-05", "pendente"),
-        ]
+        tarefas_demo = TAREFAS_DEMO
         for titulo, desc, uid, pri, prazo, st in tarefas_demo:
             db.add(
                 Tarefa(
@@ -434,13 +473,7 @@ def seed(demo: bool = False) -> None:
 
         # ── EVIDÊNCIAS DEMO ───────────────────────────────────────
         # Cada evidência aponta para um requisito real do catálogo (por ID).
-        evidencias_demo = [
-            ("Política de Investimentos 2026", "politica", "3.2.1", "Politica_Invest_2026.pdf", 1240000),
-            ("Ata CC Setembro 2026", "ata", "3.2.6", "Ata_CC_Set2026.pdf", 380000),
-            ("Relatório de Compliance Q2 2026", "relatorio", "3.2.11", "Compliance_Q2_2026.pdf", 870000),
-            ("Certificado Capacita RPPS 2025", "comprovante", "3.3.1", "Certif_Capacita2025.pdf", 215000),
-            ("Mapa de Riscos 2026", "relatorio", "3.2.10", "MapaRiscos_2026.xlsx", 520000),
-        ]
+        evidencias_demo = EVIDENCIAS_DEMO
         for titulo, tipo, req, arq, tam in evidencias_demo:
             db.add(
                 Evidencia(
@@ -475,5 +508,342 @@ def print_credenciais() -> None:
     print("   Visualizador   → viewer@previc.gov.br")
 
 
+# ══════════════════════════════════════════════════════════════════
+# DADOS DEMO DE NEGÓCIO (aplicáveis a um banco já existente)
+# ══════════════════════════════════════════════════════════════════
+
+UNIDADES_DEMO = [
+    ("un01", "DPR", "Diretoria de Previdência"),
+    ("un02", "GEPRE", "Gerência de Previdência"),
+    ("un03", "GECOP", "Gerência de Controle e Pagamento"),
+    ("un04", "GEFIN", "Gerência Financeira"),
+    ("un05", "UCGR", "Unidade de Controle e Gestão de Recursos"),
+    ("un06", "GEINP", "Gerência de Informação e Publicidade"),
+    ("un07", "OUVFUMPRES", "Ouvidoria FUMPRES"),
+    ("un08", "GAB DPR", "Gabinete da Diretoria de Previdência"),
+    ("un09", "ASSGER", "Assessoria de Gestão"),
+    ("un10", "SEAPO", "Setor de Apoio ao Segurado"),
+]
+
+# (chave demo, requisito, nome, descrição, unidade, status, prazo, envio)
+ACORES_DEMO = [
+    ("AC-001", "3.1.1", "Mapear o fluxo de concessão de benefícios", "Mapeamento documentado com responsável, sistema e evidências", "un01", "PENDENTE", "2026-09-30", None),
+    ("AC-002", "3.1.1", "Mapeamento da arrecadação", "Mapeamento da arrecadação mensal de contribuições e cobrança de débitos previdenciários", "un04", "PENDENTE", "2026-09-30", None),
+    ("AC-003", "3.1.1", "Concluir mapeamento da arrecadação", "Fluxo de arrecadação mensal documentado e validado", "un05", "APROVADO", "2026-09-30", "2026-05-15"),
+    ("AC-004", "3.1.1", "Mapeamento da arrecadação", "Mapeamento da arrecadação mensal de contribuições e cobrança de débitos previdenciários", "un02", "ENVIADO", "2026-09-30", "2026-06-10"),
+    ("AC-005", "3.1.1", "Mapeamento do atendimento ao segurado", "Mapeamento do fluxo de atendimento presencial e remoto aos segurados", "un10", "APROVADO", "2026-09-30", "2026-06-02"),
+    ("AC-006", "3.1.1", "Mapeamento das rotinas financeiras", "Mapeamento das rotinas financeiras e contabilidade do RPPS", "un04", "APROVADO", "2026-09-30", "2026-06-05"),
+    ("AC-007", "3.1.1", "Mapeamento detalhado da concessão", "Mapeamento detalhado do fluxo de análise e concessão de benefícios", "un01", "PENDENTE", "2026-09-30", None),
+    ("AC-008", "3.1.1", "Mapeamento dos processos da Ouvidoria", "Mapeamento dos processos da Ouvidoria e canais de manifestação", "un07", "PENDENTE", "2026-09-30", None),
+    ("AC-011", "3.1.3", "Certificação do Diretor de Previdência", "Certificação profissional válida do Diretor de Previdência", "un01", "APROVADO", "2026-09-30", "2026-03-10"),
+    ("AC-012", "3.1.3", "Certificação do Presidente do Conselho", "Certificação profissional do Presidente do Conselho Deliberativo", "un08", "APROVADO", "2026-09-30", "2026-03-12"),
+    ("AC-013", "3.1.3", "Renovação da certificação da Gestora", "Certificação da Gestora de Previdência — vencida em mar/2026", "un08", "DILIGÊNCIA", "2026-06-23", "2026-03-01"),
+    ("AC-021", "3.2.2", "Plano Estratégico do RPPS", "Planejamento Estratégico do RPPS aprovado pelo Conselho Deliberativo", "un01", "APROVADO", "2026-03-31", "2026-01-20"),
+    ("AC-022", "3.2.2", "Plano de Ação Anual 2026", "Plano de Ação Anual 2026 com metas quantitativas e ata de aprovação do CD", "un04", "DILIGÊNCIA", "2026-03-15", "2026-03-01"),
+    ("AC-023", "3.2.2", "Plano Plurianual do ente", "PPA do ente federativo vigente com ações do RPPS inseridas", "un01", "PENDENTE", "2026-09-30", None),
+    ("AC-031", "3.2.8", "Publicar balanço anual no portal", "Balanço publicado com link permanente no portal da transparência", "un06", "APROVADO", "2026-06-30", "2026-01-20"),
+    ("AC-032", "3.2.8", "Publicar relatório de gestão", "Relatório de Gestão anual publicado no portal de transparência", "un06", "APROVADO", "2026-06-30", "2026-01-25"),
+    ("AC-033", "3.2.8", "Publicar demonstrações mensais", "Demonstrações financeiras mensais jan–jun/2026 publicadas no portal", "un06", "ENVIADO", "2026-07-17", "2026-07-18"),
+    ("AC-041", "3.3.1", "Executar o plano de capacitação 2026", "Plano executado com lista de participantes e certificados", "un03", "APROVADO", "2026-09-30", "2026-03-15"),
+    ("AC-042", "3.3.1", "Comprovação do Capacita FUMPRES 2026", "Comprovação de realização e certificados do Capacita FUMPRES 2026", "un03", "PENDENTE", "2026-11-30", None),
+    ("AC-043", "3.3.1", "Certificados de capacitação da concessão", "Certificados dos servidores da área de concessão em capacitação técnica", "un01", "PENDENTE", "2026-11-30", None),
+]
+
+# (num, chave demo da ação, situação detectada, criticidade, prazo, status)
+DILIGENCIAS_DEMO = [
+    ("D-001", "AC-033", "Demonstrações financeiras mensais ausentes no portal. Publicar jan-jun/2026.", "alta", "2026-07-17", "retorno"),
+    ("D-002", "AC-022", "Plano de Ação Anual 2026 enviado sem ata de aprovação do Conselho Deliberativo.", "critica", "2026-03-15", "vencida"),
+    ("D-003", "AC-013", "Certificação da Gestora vencida em março/2026. Renovação obrigatória para manutenção do Nível IV.", "critica", "2026-06-23", "aberta"),
+    ("D-004", "AC-004", "Mapeamento da compensação previdenciária incompleto — falta fluxograma assinado.", "media", "2026-07-31", "retorno"),
+]
+
+TAREFAS_DEMO = [
+    ("Revisar Política de Controle Interno", "Atualizar conforme manual v4.1", "un01", "alta", "2026-11-15", "pendente"),
+    ("Elaborar Ata da Reunião do CC", "Reunião de outubro/2026", "un02", "media", "2026-10-30", "em_andamento"),
+    ("Enviar comprovante do Capacita 2026", "Certificados de participação", "un03", "alta", "2026-11-30", "pendente"),
+    ("Atualizar mapa de riscos operacionais", "Ciclo anual de revisão", "un04", "critica", "2026-10-20", "em_andamento"),
+    ("Publicar relatório no hotsite", "Relatório de conformidade Q3 2026", "un01", "baixa", "2026-11-05", "pendente"),
+]
+
+EVIDENCIAS_DEMO = [
+    ("Política de Investimentos 2026", "politica", "3.2.1", "Politica_Invest_2026.pdf", 1240000),
+    ("Ata CC Setembro 2026", "ata", "3.2.6", "Ata_CC_Set2026.pdf", 380000),
+    ("Relatório de Compliance Q2 2026", "relatorio", "3.2.11", "Compliance_Q2_2026.pdf", 870000),
+    ("Certificado Capacita RPPS 2025", "comprovante", "3.3.1", "Certif_Capacita2025.pdf", 215000),
+    ("Mapa de Riscos 2026", "relatorio", "3.2.10", "MapaRiscos_2026.xlsx", 520000),
+]
+
+
+def popular_demo_negocio(db, tenant: Tenant) -> None:
+    """Popula os dados de negócio demo (plano de ação, diligências, tarefas) em
+    um banco que já tem a estrutura base e o catálogo.
+
+    Não apaga nada: apenas cria o que ainda não existe. Ideal para popular
+    um banco de desenvolvimento que já tem tenant, manual e itens.
+    """
+    manual = (
+        db.query(Manual)
+        .filter(Manual.versao_manual == "4.1")
+        .order_by(Manual.id_manual)
+        .first()
+    )
+    if manual is None:
+        raise RuntimeError("Catálogo não encontrado — rode `python -m app.db.seed --demo`.")
+
+    # Requisitos e itens do catálogo (por ID).
+    req_id_por_cod: dict[str, int] = {
+        r.cod_requisito: r.id_requisito
+        for r in db.query(Requisito).filter(Requisito.id_manual == manual.id_manual).all()
+    }
+    itens_por_cod: dict[str, list[tuple[int, str]]] = {}
+    for cod, rid in req_id_por_cod.items():
+        itens = (
+            db.query(Item)
+            .filter(Item.id_requisito == rid)
+            .order_by(Item.nivel, Item.id_item)
+            .all()
+        )
+        if itens:
+            itens_por_cod[cod] = [(i.id_item, i.nivel) for i in itens]
+
+    # Uma certificação por nível, do ente, para o manual 4.1.
+    niveis = {n.nome_nivel: n for n in db.query(Nivel).order_by(Nivel.nome_nivel).all()}
+    cert_por_nivel: dict[str, Certificacao] = {}
+    for nome, nivel in niveis.items():
+        cert = (
+            db.query(Certificacao)
+            .filter(
+                Certificacao.tenant_id == tenant.id,
+                Certificacao.id_manual == manual.id_manual,
+                Certificacao.id_nivel == nivel.id_nivel,
+            )
+            .first()
+        )
+        if cert is None:
+            cert = Certificacao(
+                id_manual=manual.id_manual,
+                id_nivel=nivel.id_nivel,
+                tenant_id=tenant.id,
+                nome_certificacao=f"Certificação Pró-Gestão — Nível {nome}",
+                status="PENDENTE",
+            )
+            db.add(cert)
+            db.flush()
+        cert_por_nivel[nome] = cert
+
+    # Unidades demo (as que faltarem).
+    for uid, sigla, nome in UNIDADES_DEMO:
+        if db.get(Unidade, uid) is None:
+            db.add(Unidade(id=uid, tenant_id=tenant.id, sigla=sigla, nome=nome, criado_por="u002"))
+    db.flush()
+
+    # Vínculos de perfil por unidade: o Operador e o Visualizador precisam de
+    # uma unidade (é o que limita o escopo de ações/diligências deles).
+    for uid, unid, pid in [("u003", "un04", "pf03"), ("u004", "un02", "pf04")]:
+        vinculo = (
+            db.query(UsuarioUnidadePerfil)
+            .filter(
+                UsuarioUnidadePerfil.usuario_id == uid,
+                UsuarioUnidadePerfil.perfil_id == pid,
+            )
+            .first()
+        )
+        if vinculo is None:
+            db.add(
+                UsuarioUnidadePerfil(
+                    usuario_id=uid, unidade_id=unid, perfil_id=pid, concedido_por="u001"
+                )
+            )
+        elif not vinculo.unidade_id:
+            vinculo.unidade_id = unid
+    db.flush()
+
+    # Vínculos requisito x unidade.
+    req_unid_map = {
+        "3.1.1": ["un01", "un04", "un05", "un02", "un10", "un07", "un08"],
+        "3.1.3": ["un01", "un08"],
+        "3.2.2": ["un01", "un04"],
+        "3.2.8": ["un06"],
+        "3.3.1": ["un03", "un01"],
+    }
+    for req_cod, uids in req_unid_map.items():
+        rid = req_id_por_cod.get(req_cod)
+        if rid is None:
+            continue
+        for uid in uids:
+            existe = (
+                db.query(RequisitoUnidade)
+                .filter(
+                    RequisitoUnidade.requisito_id == rid,
+                    RequisitoUnidade.unidade_id == uid,
+                )
+                .first()
+            )
+            if not existe:
+                db.add(RequisitoUnidade(requisito_id=rid, unidade_id=uid))
+    db.flush()
+
+    # Ações (uma linha por ação — o planejamento faz parte do registro).
+    if db.query(Acao).filter(Acao.tenant_id == tenant.id).count() == 0:
+        item_por_requisito: dict[str, int] = {}
+        for _chave, req, nome, desc, unid, st, prazo, dt_envio in ACORES_DEMO:
+            itens_req = itens_por_cod.get(req, [])
+            if not itens_req:
+                continue
+            pos = item_por_requisito.get(req, 0)
+            item_por_requisito[req] = pos + 1
+            id_item, nivel_item = itens_req[pos % len(itens_req)]
+            cert = cert_por_nivel.get(nivel_item) or cert_por_nivel["I"]
+            acao = Acao(
+                tenant_id=tenant.id,
+                id_certificacao=cert.id_certificacao,
+                id_requisito=req_id_por_cod[req],
+                id_item=id_item,
+                id_unidade=unid,
+                nome=nome,
+                descricao=desc,
+                prazo=date.fromisoformat(prazo),
+                data_envio=date.fromisoformat(dt_envio) if dt_envio else None,
+                status=st,
+                data_aprovacao=(
+                    date.fromisoformat(dt_envio) if (dt_envio and st == "APROVADO") else None
+                ),
+                criado_por="u002",
+            )
+            db.add(acao)
+            db.flush()
+            db.add(
+                HistoricoAcao(
+                    acao_id=acao.id_acao,
+                    descricao_evento="Ação criada por João Silva (Admin do Ente)",
+                    usuario_id="u002",
+                )
+            )
+            if dt_envio:
+                db.add(
+                    HistoricoAcao(
+                        acao_id=acao.id_acao,
+                        descricao_evento="Status alterado: PENDENTE → ENVIADO por João Silva",
+                        usuario_id="u002",
+                    )
+                )
+            if st == "APROVADO":
+                db.add(
+                    HistoricoAcao(
+                        acao_id=acao.id_acao,
+                        descricao_evento="Status alterado: ENVIADO → APROVADO por João Silva",
+                        usuario_id="u002",
+                    )
+                )
+            elif st == "DILIGÊNCIA":
+                db.add(
+                    HistoricoAcao(
+                        acao_id=acao.id_acao,
+                        descricao_evento="Status alterado: ENVIADO → DILIGÊNCIA por João Silva",
+                        usuario_id="u002",
+                    )
+                )
+    db.flush()
+
+    # Diligências (apontando por id_acao).
+    if db.query(Diligencia).count() == 0:
+        acoes = {a.id_acao: a for a in db.query(Acao).filter(Acao.tenant_id == tenant.id).all()}
+        por_nome = {a.nome: a for a in acoes.values()}
+        for num, chave_acao, sit, crit, prazo, status_d in DILIGENCIAS_DEMO:
+            _, _, nome, _, _, _, _, _ = next(
+                (a for a in ACORES_DEMO if a[0] == chave_acao),
+                (None, None, None, None, None, None, None, None),
+            )
+            acao = por_nome.get(nome) if nome else None
+            if acao is None:
+                continue
+            db.add(
+                Diligencia(
+                    num=num,
+                    acao_id=acao.id_acao,
+                    situacao_detectada=sit,
+                    criticidade=crit,
+                    prazo_resposta=date.fromisoformat(prazo),
+                    prazo_original=date.fromisoformat(prazo),
+                    status=status_d,
+                    emitido_por="u002",
+                )
+            )
+    db.flush()
+
+    # Certificação do ente (nível atual).
+    cert_atual = cert_por_nivel.get("III")
+    if cert_atual is not None:
+        cert_atual.status = "VENCIDA"
+        cert_atual.numero_certificado = "CERT-III-2024-0042"
+        cert_atual.data_certificacao = date(2024, 6, 1)
+        cert_atual.data_validade = date(2026, 6, 1)
+        cert_atual.entidade_certificadora = "IEPREV"
+
+    # Processo Pró-Gestão.
+    if db.query(ProcessoProgestao).filter(ProcessoProgestao.tenant_id == tenant.id).count() == 0:
+        db.add(
+            ProcessoProgestao(
+                id="proc-fumpres-2026-001",
+                tenant_id=tenant.id,
+                nivel_pretendido="IV",
+                tipo_processo="renovacao",
+                entidade_certificadora="IEPREV",
+                numero_protocolo="2026/0042-PG",
+                data_adesao=date(2022, 3, 1),
+                data_inicio_avaliacao=date(2026, 1, 15),
+                data_prevista_auditoria=date(2026, 12, 10),
+                status="em_andamento",
+                dados_confirmados=False,
+                criado_por="u001",
+            )
+        )
+
+    # Tarefas e evidências.
+    if db.query(Tarefa).filter(Tarefa.tenant_id == tenant.id).count() == 0:
+        for titulo, desc, uid, pri, prazo, st in TAREFAS_DEMO:
+            db.add(
+                Tarefa(
+                    tenant_id=tenant.id,
+                    titulo=titulo,
+                    descricao=desc,
+                    unidade_id=uid,
+                    prioridade=pri,
+                    prazo=date.fromisoformat(prazo),
+                    status=st,
+                    criado_por="u001",
+                )
+            )
+    if db.query(Evidencia).filter(Evidencia.tenant_id == tenant.id).count() == 0:
+        for titulo, tipo, req, arq, tam in EVIDENCIAS_DEMO:
+            db.add(
+                Evidencia(
+                    tenant_id=tenant.id,
+                    titulo=titulo,
+                    tipo=tipo,
+                    requisito_id=req_id_por_cod.get(req),
+                    arquivo_nome=arq,
+                    arquivo_tamanho=tam,
+                    data_referencia=date(2026, 9, 1),
+                    enviado_por="u002",
+                )
+            )
+
+    db.commit()
+
+
 if __name__ == "__main__":
-    seed(demo="--demo" in sys.argv)
+    if "--demo-negocio" in sys.argv:
+        Base.metadata.create_all(bind=engine)
+        db = SessionLocal()
+        try:
+            tenant = db.query(Tenant).first()
+            if tenant is None:
+                print("Banco sem tenant — rode `python -m app.db.seed --demo` primeiro.")
+            else:
+                popular_demo_negocio(db, tenant)
+                print("✅ Dados de negócio demo aplicados.")
+        finally:
+            db.close()
+    else:
+        seed(demo="--demo" in sys.argv)

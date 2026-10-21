@@ -14,36 +14,81 @@ class RequisitoOut(BaseModel):
 
 
 class AcaoCreate(BaseModel):
-    id_requisito: int | None = None
-    requisito_cod: str | None = None  # legado; usado quando id_requisito não é informado
-    item: str
-    descricao_acao: str
-    prazo: date
+    id_certificacao: int | None = None
+    id_requisito: int
+    id_item: int
+    id_unidade: str | None = None
     unidade_ids: list[str] = Field(default_factory=list)
-    unidade_id: str | None = None
+    nome: str = Field(min_length=1, max_length=300)
+    descricao: str = Field(min_length=1)
+    prazo: date
+    status: str = "PENDENTE"
+    data_envio: date | None = None
+
+
+class AcaoUpdate(BaseModel):
+    id_certificacao: int | None = None
+    id_requisito: int | None = None
+    id_item: int | None = None
+    id_unidade: str | None = None
+    nome: str | None = Field(default=None, min_length=1, max_length=300)
+    descricao: str | None = None
+    prazo: date | None = None
+    status: str | None = None
+    data_envio: date | None = None
+    data_aprovacao: date | None = None
 
 
 class AcaoStatusUpdate(BaseModel):
     status: str  # PENDENTE | ENVIADO | APROVADO | DILIGÊNCIA
 
 
+class AcaoHistoricoOut(BaseModel):
+    dt: str
+    ev: str
+
+
+class AcaoDocumentoOut(BaseModel):
+    id: str
+    nome_arquivo: str
+    tipo_arquivo: str
+    versao: int | None
+    tamanho_bytes: int | None
+    enviado_em: datetime | None
+
+
 class AcaoOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
-    id_acao: str
-    requisito_id: int
-    item: str
-    descricao_acao: str
-    unidade_id: str
+    id_acao: int
+    id_certificacao: int
+    id_requisito: int
+    id_item: int | None
+    id_unidade: str
+    nome: str
+    descricao: str
+    prazo: date
+    data_envio: date | None
     status: str
-    prazo: date | None
-    dt_envio: date | None
-    dt_aprovacao: date | None
+    data_aprovacao: date | None
     criado_em: datetime | None
+    atualizado_em: datetime | None
+    # nomes resolvidos por JOIN (leitura)
+    cod_requisito: str = ""
+    nome_requisito: str = ""
+    nome_item: str = ""
+    sigla_unidade: str = ""
+    nome_unidade: str = ""
+    nome_certificacao: str = ""
+    nome_nivel: str = ""
+    versao_manual: str = ""
+    historico: list[AcaoHistoricoOut] = []
+    documentos: list[AcaoDocumentoOut] = []
+    diligencias_count: int = 0
 
 
 class DiligenciaCreate(BaseModel):
-    acao_id: str
+    acao_id: int
     situacao_detectada: str
     criticidade: str = "media"
     prazo_resposta: date
@@ -58,7 +103,7 @@ class DiligenciaOut(BaseModel):
 
     id: str
     num: str
-    acao_id: str
+    acao_id: int
     situacao_detectada: str
     criticidade: str
     prazo_resposta: date | None

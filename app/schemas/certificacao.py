@@ -1,29 +1,61 @@
-from datetime import date
+from datetime import date, datetime
 
-from pydantic import BaseModel, ConfigDict, EmailStr
+from pydantic import BaseModel, ConfigDict, EmailStr, Field
+
+
+class NivelOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id_nivel: int
+    nome_nivel: str
+
+
+class NivelCreate(BaseModel):
+    nome_nivel: str = Field(min_length=1, max_length=10)
+
+
+class NivelUpdate(BaseModel):
+    nome_nivel: str | None = Field(default=None, min_length=1, max_length=10)
 
 
 class CertificacaoCreate(BaseModel):
-    nivel: str = "III"
-    data_certificacao: date
-    data_validade: date
-    entidade_certificadora: str = ""
-    status: str = "vigente"
+    id_manual: int
+    id_nivel: int
+    nome_certificacao: str = Field(min_length=1, max_length=200)
+    status: str = "PENDENTE"
     numero_certificado: str | None = None
-    observacoes: str | None = None
+    data_certificacao: date | None = None
+    data_validade: date | None = None
+    entidade_certificadora: str | None = None
+
+
+class CertificacaoUpdate(BaseModel):
+    id_nivel: int | None = None
+    nome_certificacao: str | None = Field(default=None, min_length=1, max_length=200)
+    status: str | None = None
+    numero_certificado: str | None = None
+    data_certificacao: date | None = None
+    data_validade: date | None = None
+    entidade_certificadora: str | None = None
 
 
 class CertificacaoOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
-    id: str
-    nivel: str
-    data_certificacao: date
-    data_validade: date
-    entidade_certificadora: str
+    id_certificacao: int
+    id_manual: int
+    id_nivel: int
+    nome_certificacao: str
     status: str
     numero_certificado: str | None
-    observacoes: str | None
+    data_certificacao: date | None
+    data_validade: date | None
+    entidade_certificadora: str | None
+    criado_em: datetime | None
+    atualizado_em: datetime | None
+    nome_nivel: str = ""
+    nome_manual: str = ""
+    versao_manual: str = ""
 
 
 class AuditoriaCreate(BaseModel):

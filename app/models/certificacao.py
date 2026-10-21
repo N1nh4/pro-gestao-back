@@ -9,30 +9,63 @@ from sqlalchemy import (
     DateTime,
     Float,
     ForeignKey,
+    Integer,
     String,
     Text,
+    UniqueConstraint,
 )
 from sqlalchemy.orm import relationship
 
 from app.db.base import Base, gen_uuid
 
 
+class Nivel(Base):
+    """Domínio dos níveis de certificação do Pró-Gestão (I–IV)."""
+
+    __tablename__ = "nivel"
+    __table_args__ = (UniqueConstraint("nome_nivel", name="uq_nivel_nome"),)
+
+    id_nivel = Column(Integer, primary_key=True)
+    nome_nivel = Column(String(10), nullable=False)
+
+    certificacoes = relationship("Certificacao", back_populates="nivel")
+
+
 class Certificacao(Base):
-    __tablename__ = "certificacoes"
+    """Certificação do ente: um registro por (ente, manual, nível).
 
-    id = Column(String(36), primary_key=True, default=gen_uuid)
+    Reúne o que o manual oferece (manual + nível) e o que o ente tem
+    (status, número do certificado, datas e entidade certificadora).
+    """
+
+    __tablename__ = "certificacao"
+    __table_args__ = (
+        UniqueConstraint(
+            "tenant_id", "id_manual", "id_nivel", name="uq_certificacao_tenant_manual_nivel"
+        ),
+    )
+
+    id_certificacao = Column(Integer, primary_key=True)
+    id_manual = Column(
+        Integer, ForeignKey("manual.id_manual", ondelete="RESTRICT"), nullable=False
+    )
+    id_nivel = Column(
+        Integer, ForeignKey("nivel.id_nivel", ondelete="RESTRICT"), nullable=False
+    )
     tenant_id = Column(String(36), ForeignKey("tenants.id"), nullable=False)
-    nivel = Column(String(10), nullable=False)
-    data_certificacao = Column(Date, nullable=False)
-    data_validade = Column(Date, nullable=False)
-    entidade_certificadora = Column(String(200), nullable=False)
-    status = Column(String(20), default="vigente")
+    nome_certificacao = Column(String(200), nullable=False)
+    status = Column(String(20), nullable=False, default="PENDENTE")
     numero_certificado = Column(String(50))
-    observacoes = Column(Text)
-    registrado_por = Column(String(36), ForeignKey("usuarios.id"))
+    data_certificacao = Column(Date)
+    data_validade = Column(Date)
+    entidade_certificadora = Column(String(200))
     criado_em = Column(DateTime, default=datetime.utcnow)
+    atualizado_em = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
+    manual = relationship("Manual", back_populates="certificacoes")
+    nivel = relationship("Nivel", back_populates="certificacoes")
     tenant = relationship("Tenant", back_populates="certificacoes")
+    acoes = relationship("Acao", back_populates="certificacao")
 
 
 class ProcessoProgestao(Base):

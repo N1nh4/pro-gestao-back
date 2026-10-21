@@ -1,6 +1,11 @@
 """Modelos SQLAlchemy (importados aqui para registrar no metadata da Base)."""
 
-from app.models.certificacao import Auditoria, Certificacao, ProcessoProgestao
+from app.models.certificacao import (
+    Auditoria,
+    Certificacao,
+    Nivel,
+    ProcessoProgestao,
+)
 from app.models.ged import Evidencia, Tarefa
 from app.models.progestao import (
     Acao,
@@ -52,6 +57,7 @@ __all__ = [
     "Documento",
     # certificação
     "Certificacao",
+    "Nivel",
     "ProcessoProgestao",
     "Auditoria",
     # operacional

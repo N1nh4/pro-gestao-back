@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import get_usuario_atual, requer_perfil
 from app.db import get_db
-from app.models import Acao, Dimensao, Item, Manual, Requisito, Usuario
+from app.models import Acao, Certificacao, Dimensao, Item, Manual, Nivel, Requisito, Usuario
 from app.schemas import (
     DimensaoCreate,
     DimensaoOut,
@@ -21,6 +21,9 @@ from app.schemas import (
     ManualCreate,
     ManualOut,
     ManualUpdate,
+    NivelCreate,
+    NivelOut,
+    NivelUpdate,
     RequisitoCatalogoOut,
     RequisitoCreate,
     RequisitoUpdate,
@@ -320,11 +323,84 @@ def remover_requisito(
         raise HTTPException(status_code=404, detail="Requisito não encontrado")
     # Itens caem em cascata (ON DELETE CASCADE). Ações seguem RESTRICT.
     qtd_acoes = (
-        db.query(func.count(Acao.id_acao)).filter(Acao.requisito_id == id_requisito).scalar()
+        db.query(func.count(Acao.id_acao)).filter(Acao.id_requisito == id_requisito).scalar()
     )
     if qtd_acoes:
         raise HTTPException(status_code=409, detail="Requisito possui ações vinculadas")
     db.delete(requisito)
+    db.commit()
+
+
+# ── NÍVEIS ────────────────────────────────────────────────────────
+
+
+@router.get("/niveis", response_model=list[NivelOut])
+def listar_niveis(
+    db: Session = Depends(get_db),
+    _: Usuario = Depends(get_usuario_atual),
+):
+    return db.query(Nivel).order_by(Nivel.nome_nivel).all()
+
+
+@router.post("/niveis", response_model=NivelOut, status_code=201)
+def criar_nivel(
+    req: NivelCreate,
+    db: Session = Depends(get_db),
+    _: Usuario = Depends(_admin),
+):
+    existe = db.query(Nivel).filter(Nivel.nome_nivel == req.nome_nivel).first()
+    if existe:
+        raise HTTPException(status_code=409, detail="Já existe um nível com esse nome")
+    nivel = Nivel(**req.model_dump())
+    db.add(nivel)
+    db.commit()
+    db.refresh(nivel)
+    return nivel
+
+
+@router.put("/niveis/{id_nivel}", response_model=NivelOut)
+def atualizar_nivel(
+    id_nivel: int,
+    req: NivelUpdate,
+    db: Session = Depends(get_db),
+    _: Usuario = Depends(_admin),
+):
+    nivel = db.get(Nivel, id_nivel)
+    if not nivel:
+        raise HTTPException(status_code=404, detail="Nível não encontrado")
+    dados = req.model_dump(exclude_unset=True)
+    if "nome_nivel" in dados:
+        conflito = (
+            db.query(Nivel)
+            .filter(Nivel.nome_nivel == dados["nome_nivel"], Nivel.id_nivel != id_nivel)
+            .first()
+        )
+        if conflito:
+            raise HTTPException(status_code=409, detail="Já existe um nível com esse nome")
+    for campo, valor in dados.items():
+        setattr(nivel, campo, valor)
+    db.commit()
+    db.refresh(nivel)
+    return nivel
+
+
+@router.delete("/niveis/{id_nivel}", status_code=204)
+def remover_nivel(
+    id_nivel: int,
+    db: Session = Depends(get_db),
+    _: Usuario = Depends(_admin),
+):
+    nivel = db.get(Nivel, id_nivel)
+    if not nivel:
+        raise HTTPException(status_code=404, detail="Nível não encontrado")
+    qtd = (
+        db.query(func.count(Certificacao.id_certificacao))
+        .filter(Certificacao.id_nivel == id_nivel)
+        .scalar()
+    )
+    if qtd:
+        raise HTTPException(status_code=409, detail="Nível possui certificações vinculadas")
+    db.delete(nivel)
     db.commit()
 
 

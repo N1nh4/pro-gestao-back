@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_usuario_atual
+from app.api.deps import get_usuario_atual, requer_perfil
 from app.db import get_db
 from app.models import (
     Acao,
@@ -18,12 +18,13 @@ from app.models import (
 from app.schemas import DiligenciaCreate, DiligenciaRetorno
 
 router = APIRouter(prefix="/api/diligencias", tags=["Diligências"])
+_admin = requer_perfil("Admin Master", "Admin do Ente")
 
 
 @router.get("")
 def listar_diligencias(
     status: str | None = Query(None),
-    acao_id: str | None = Query(None),
+    acao_id: int | None = Query(None),
     db: Session = Depends(get_db),
     usuario: Usuario = Depends(get_usuario_atual),
 ):
@@ -59,7 +60,7 @@ def listar_diligencias(
 def criar_diligencia(
     req: DiligenciaCreate,
     db: Session = Depends(get_db),
-    atual: Usuario = Depends(get_usuario_atual),
+    atual: Usuario = Depends(_admin),
 ):
     acao = (
         db.query(Acao)
@@ -68,6 +69,13 @@ def criar_diligencia(
     )
     if not acao:
         raise HTTPException(status_code=404, detail="Ação não encontrada")
+    if acao.status != "ENVIADO":
+        raise HTTPException(
+            status_code=409,
+            detail="A ação precisa estar enviada para receber uma diligência",
+        )
+    if req.criticidade not in {"critica", "alta", "media", "baixa"}:
+        raise HTTPException(status_code=422, detail="Criticidade inválida")
 
     total = (
         db.query(func.count(Diligencia.id))
@@ -140,9 +148,14 @@ def enviar_retorno(
 def aprovar_diligencia(
     dil_id: str,
     db: Session = Depends(get_db),
-    atual: Usuario = Depends(get_usuario_atual),
+    atual: Usuario = Depends(_admin),
 ):
-    dil = db.query(Diligencia).filter(Diligencia.id == dil_id).first()
+    dil = (
+        db.query(Diligencia)
+        .join(Acao)
+        .filter(Diligencia.id == dil_id, Acao.tenant_id == atual.tenant_id)
+        .first()
+    )
     if not dil:
         raise HTTPException(status_code=404, detail="Diligência não encontrada")
 
@@ -150,7 +163,7 @@ def aprovar_diligencia(
     acao = db.query(Acao).filter(Acao.id_acao == dil.acao_id).first()
     if acao:
         acao.status = "APROVADO"
-        acao.dt_aprovacao = date.today()
+        acao.data_aprovacao = date.today()
         db.add(
             HistoricoAcao(
                 acao_id=acao.id_acao,

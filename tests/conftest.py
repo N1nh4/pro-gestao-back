@@ -13,9 +13,11 @@ import pytest
 def client():
     # Banco isolado por sessão de testes, antes de importar a aplicação.
     db_path = Path(tempfile.gettempdir()) / "sac_progestao_pytest.db"
+    upload_dir = tempfile.TemporaryDirectory(prefix="sac_progestao_uploads_")
     if db_path.exists():
         db_path.unlink()
     os.environ["DATABASE_URL"] = f"sqlite:///{db_path.as_posix()}"
+    os.environ["UPLOAD_DIR"] = upload_dir.name
     os.environ["REDIS_ENABLED"] = "false"
 
     from fastapi.testclient import TestClient
@@ -36,6 +38,7 @@ def client():
         db_path.unlink(missing_ok=True)
     except PermissionError:
         pass
+    upload_dir.cleanup()
 
 
 @pytest.fixture(scope="session")

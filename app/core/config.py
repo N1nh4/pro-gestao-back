@@ -1,6 +1,7 @@
 """Configurações da aplicação (carregadas de variáveis de ambiente / .env)."""
 
 from functools import lru_cache
+from pathlib import Path
 
 from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -35,6 +36,7 @@ class Settings(BaseSettings):
     # ── Redis (opcional por enquanto) ────────────────────────────
     redis_enabled: bool = False
     redis_url: str = "redis://localhost:6379/0"
+    upload_dir: Path = Path("uploads")
 
     # ── CORS ─────────────────────────────────────────────────────
     cors_origins: list[str] = ["http://localhost:3000", "http://127.0.0.1:3000"]
