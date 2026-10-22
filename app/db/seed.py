@@ -15,6 +15,7 @@ from app.db.base import Base, SessionLocal, engine
 from app.db.catalogo_itens import ITENS_POR_REQUISITO
 from app.models import (  # noqa: F401
     Acao,
+    Auditoria,
     Certificacao,
     Diligencia,
     Dimensao,
@@ -187,11 +188,8 @@ def seed(demo: bool = False) -> None:
 
         # ── NÍVEIS DE CERTIFICAÇÃO (I–IV) ─────────────────────────
         # Domínio fixo do Pró-Gestão: todo manual oferece um nível de cada vez.
-        niveis: dict[str, Nivel] = {}
         for nome in ("I", "II", "III", "IV"):
-            nivel = Nivel(nome_nivel=nome)
-            db.add(nivel)
-            niveis[nome] = nivel
+            db.add(Nivel(nome_nivel=nome))
         db.flush()
 
         # ── MANUAL 4.1 + DIMENSÕES + REQUISITOS + ITENS ───────────
@@ -206,18 +204,13 @@ def seed(demo: bool = False) -> None:
         db.add(manual)
         db.flush()
 
-        # Uma certificação por nível, por manual, para este ente.
-        cert_por_nivel: dict[str, Certificacao] = {}
-        for nome, nivel in niveis.items():
-            cert = Certificacao(
-                id_manual=manual.id_manual,
-                id_nivel=nivel.id_nivel,
-                tenant_id=tenant.id,
-                nome_certificacao=f"Certificação Pró-Gestão — Nível {nome}",
-                status="PENDENTE",
-            )
-            db.add(cert)
-            cert_por_nivel[nome] = cert
+        # Certificado do ente (um por ente). As auditorias ficam dentro dele.
+        cert = Certificacao(
+            tenant_id=tenant.id,
+            nome_certificacao="Certificação Pró-Gestão RPPS",
+            status="PENDENTE",
+        )
+        db.add(cert)
         db.flush()
 
         dims = {
@@ -229,35 +222,35 @@ def seed(demo: bool = False) -> None:
             db.add(d)
         db.flush()
 
-        # (cod, nome_requisito, essencial) — a dimensão sai do prefixo do cod.
+        # (cod, nome_requisito) — a dimensão sai do prefixo do cod.
         reqs_data = [
-            ("3.1.1", "Mapeamento das Atividades das Áreas", True),
-            ("3.1.2", "Capacitação dos Responsáveis pelas Áreas", True),
-            ("3.1.3", "Certificação dos Dirigentes e Membros dos Conselhos", True),
-            ("3.1.4", "Plano de Capacitação dos Responsáveis", False),
-            ("3.1.5", "Adesão ao CADPREV", True),
-            ("3.1.6", "Implantação de Controles Internos", True),
-            ("3.2.1", "Definição da Política de Investimentos", True),
-            ("3.2.2", "Planejamento Estratégico", True),
-            ("3.2.3", "Comitê de Investimentos", False),
-            ("3.2.4", "Alienação de Bens e Direitos", False),
-            ("3.2.5", "Instâncias de Deliberação", True),
-            ("3.2.6", "Reuniões dos Conselhos", True),
-            ("3.2.7", "Código de Ética e Conduta", False),
-            ("3.2.8", "Transparência e Publicidade", True),
-            ("3.2.9", "Canal de Denúncias", False),
-            ("3.2.10", "Gestão de Riscos", False),
-            ("3.2.11", "Relatório de Gestão", True),
-            ("3.2.12", "Auditoria Interna", False),
-            ("3.2.13", "Normas Internas", False),
-            ("3.2.14", "Segregação de Funções", False),
-            ("3.2.15", "Gestão de Pessoas", False),
-            ("3.2.16", "Tecnologia da Informação", False),
-            ("3.3.1", "Plano de Ação de Educação Previdenciária", True),
-            ("3.3.2", "Programa de Educação Previdenciária", False),
+            ("3.1.1", "Mapeamento das Atividades das Áreas de Atuação do RPPS"),
+            ("3.1.2", "Manualização das Atividades das Áreas de Atuação do RPPS"),
+            ("3.1.3", "Certificação dos Dirigentes, Membros dos Conselhos Deliberativo e Fiscal, do Responsável pela Gestão das aplicações dos Recursos e Membros do Comitê de Investimentos"),
+            ("3.1.4", "Estrutura de Controle Interno"),
+            ("3.1.5", "Política de Segurança da Informação"),
+            ("3.1.6", "Gestão e Controle da Base de Dados Cadastrais dos Servidores Públicos, Aposentados e Pensionistas"),
+            ("3.2.1", "Relatório de Governança Corporativa"),
+            ("3.2.2", "Planejamento"),
+            ("3.2.3", "Relatório de Gestão Atuarial"),
+            ("3.2.4", "Código de Ética"),
+            ("3.2.5", "Políticas Previdenciárias de Saúde e Segurança do Servidor e Revisão de Aposentadoria por Incapacidade"),
+            ("3.2.6", "Política de Investimentos"),
+            ("3.2.7", "Comitê de Investimentos"),
+            ("3.2.8", "Transparência"),
+            ("3.2.9", "Definição de Limites de Alçadas"),
+            ("3.2.10", "Segregação das Atividades"),
+            ("3.2.11", "Ouvidoria"),
+            ("3.2.12", "Diretoria Executiva"),
+            ("3.2.13", "Conselho Fiscal"),
+            ("3.2.14", "Conselho Deliberativo"),
+            ("3.2.15", "Mandato, Representação e Recondução"),
+            ("3.2.16", "Gestão de Pessoas"),
+            ("3.3.1", "Plano de Ação de Capacitação"),
+            ("3.3.2", "Ações de Diálogo com os Segurados e a Sociedade"),
         ]
         req_id_por_cod: dict[str, int] = {}
-        for cod, nome, _ess in reqs_data:
+        for cod, nome in reqs_data:
             req = Requisito(
                 id_manual=manual.id_manual,
                 id_dimensao=dims[cod.rsplit(".", 1)[0]].id_dimensao,
@@ -301,6 +294,40 @@ def seed(demo: bool = False) -> None:
             print_credenciais()
             return
 
+        # ── AUDITORIAS (histórico do manual 4.1) ──────────────────
+        # A auditoria é a dona do plano: escolhe o manual e guarda as ações.
+        # Todas pertencem ao mesmo certificado do ente; o nível é do item.
+        auditorias_demo = [
+            ("auditoria_inicial", "presencial", date(2024, 6, 1), "II", "aprovado"),
+            ("supervisao_documental", "remota", date(2025, 6, 1), "III", "aprovado"),
+            (
+                "supervisao_presencial",
+                "presencial",
+                date(2026, 1, 15),
+                "III",
+                "aprovado_ressalvas",
+            ),
+            ("renovacao", "presencial", date(2026, 6, 1), "IV", "pendente"),
+        ]
+        auditoria_atual: Auditoria | None = None
+        for tipo, modalidade, data_auditoria, recomendado, conclusao in auditorias_demo:
+            aud = Auditoria(
+                tenant_id=tenant.id,
+                id_certificacao=cert.id_certificacao,
+                id_manual=manual.id_manual,
+                tipo=tipo,
+                modalidade=modalidade,
+                data_auditoria=data_auditoria,
+                duracao_horas=8.0,
+                nivel_recomendado=recomendado,
+                conclusao=conclusao,
+                auditor_nome="Auditor IEPREV",
+                criado_por="u001",
+            )
+            db.add(aud)
+            auditoria_atual = aud
+        db.flush()
+
         # ── UNIDADES ──────────────────────────────────────────────
         unidades_data = UNIDADES_DEMO
         for uid, sigla, nome in unidades_data:
@@ -342,7 +369,7 @@ def seed(demo: bool = False) -> None:
         db.flush()
 
         # ── AÇÕES (tabela única `acao`) ───────────────────────────
-        # Tudo por ID: certificação (ente + manual + nível), requisito, item
+        # Tudo por ID: certificação (ente + manual), requisito, item
         # e unidade. O planejamento (o quê, por quem, até quando) faz parte do
         # próprio registro da ação.
         # (chave demo, requisito, nome, descrição, unidade, status, prazo, envio)
@@ -355,11 +382,10 @@ def seed(demo: bool = False) -> None:
             itens_req = itens_por_cod.get(req, [])
             pos = item_por_requisito.get(req, 0)
             item_por_requisito[req] = pos + 1
-            id_item, nivel_item = itens_req[pos % len(itens_req)] if itens_req else (None, None)
-            cert = cert_por_nivel.get(nivel_item) or cert_por_nivel["I"]
+            id_item = itens_req[pos % len(itens_req)][0] if itens_req else None
             acao = Acao(
                 tenant_id=tenant.id,
-                id_certificacao=cert.id_certificacao,
+                id_auditoria=auditoria_atual.id,
                 id_requisito=req_id_por_cod[req],
                 id_item=id_item,
                 id_unidade=unid,
@@ -429,13 +455,12 @@ def seed(demo: bool = False) -> None:
             )
         db.flush()
 
-        # ── CERTIFICAÇÃO DO ENTE (nível atual) ────────────────────
-        cert_atual = cert_por_nivel["III"]
-        cert_atual.status = "VENCIDA"
-        cert_atual.numero_certificado = "CERT-III-2024-0042"
-        cert_atual.data_certificacao = date(2024, 6, 1)
-        cert_atual.data_validade = date(2026, 6, 1)
-        cert_atual.entidade_certificadora = "IEPREV"
+        # ── CERTIFICADO DO ENTE ───────────────────────────────────
+        cert.status = "VENCIDA"
+        cert.numero_certificado = "CERT-III-2024-0042"
+        cert.data_certificacao = date(2024, 6, 1)
+        cert.data_validade = date(2026, 6, 1)
+        cert.entidade_certificadora = "IEPREV"
 
         # ── PROCESSO PRÓ-GESTÃO ───────────────────────────────────
         db.add(
@@ -606,30 +631,66 @@ def popular_demo_negocio(db, tenant: Tenant) -> None:
         if itens:
             itens_por_cod[cod] = [(i.id_item, i.nivel) for i in itens]
 
-    # Uma certificação por nível, do ente, para o manual 4.1.
-    niveis = {n.nome_nivel: n for n in db.query(Nivel).order_by(Nivel.nome_nivel).all()}
-    cert_por_nivel: dict[str, Certificacao] = {}
-    for nome, nivel in niveis.items():
-        cert = (
-            db.query(Certificacao)
+    # Certificado do ente (um por ente) e auditorias do manual.
+    cert = (
+        db.query(Certificacao)
+        .filter(
+            Certificacao.tenant_id == tenant.id,
+            Certificacao.nome_certificacao == "Certificação Pró-Gestão RPPS",
+        )
+        .first()
+    )
+    if cert is None:
+        cert = Certificacao(
+            tenant_id=tenant.id,
+            nome_certificacao="Certificação Pró-Gestão RPPS",
+            status="PENDENTE",
+        )
+        db.add(cert)
+        db.flush()
+
+    auditorias_demo = [
+        ("auditoria_inicial", "presencial", date(2024, 6, 1), "II", "aprovado"),
+        ("supervisao_documental", "remota", date(2025, 6, 1), "III", "aprovado"),
+        (
+            "supervisao_presencial",
+            "presencial",
+            date(2026, 1, 15),
+            "III",
+            "aprovado_ressalvas",
+        ),
+        ("renovacao", "presencial", date(2026, 6, 1), "IV", "pendente"),
+    ]
+    auditoria_atual: Auditoria | None = None
+    for tipo, modalidade, data_auditoria, recomendado, conclusao in auditorias_demo:
+        aud = (
+            db.query(Auditoria)
             .filter(
-                Certificacao.tenant_id == tenant.id,
-                Certificacao.id_manual == manual.id_manual,
-                Certificacao.id_nivel == nivel.id_nivel,
+                Auditoria.tenant_id == tenant.id,
+                Auditoria.id_certificacao == cert.id_certificacao,
+                Auditoria.id_manual == manual.id_manual,
+                Auditoria.tipo == tipo,
+                Auditoria.data_auditoria == data_auditoria,
             )
             .first()
         )
-        if cert is None:
-            cert = Certificacao(
-                id_manual=manual.id_manual,
-                id_nivel=nivel.id_nivel,
+        if aud is None:
+            aud = Auditoria(
                 tenant_id=tenant.id,
-                nome_certificacao=f"Certificação Pró-Gestão — Nível {nome}",
-                status="PENDENTE",
+                id_certificacao=cert.id_certificacao,
+                id_manual=manual.id_manual,
+                tipo=tipo,
+                modalidade=modalidade,
+                data_auditoria=data_auditoria,
+                duracao_horas=8.0,
+                nivel_recomendado=recomendado,
+                conclusao=conclusao,
+                auditor_nome="Auditor IEPREV",
+                criado_por="u001",
             )
-            db.add(cert)
+            db.add(aud)
             db.flush()
-        cert_por_nivel[nome] = cert
+        auditoria_atual = aud
 
     # Unidades demo (as que faltarem).
     for uid, sigla, nome in UNIDADES_DEMO:
@@ -692,11 +753,10 @@ def popular_demo_negocio(db, tenant: Tenant) -> None:
                 continue
             pos = item_por_requisito.get(req, 0)
             item_por_requisito[req] = pos + 1
-            id_item, nivel_item = itens_req[pos % len(itens_req)]
-            cert = cert_por_nivel.get(nivel_item) or cert_por_nivel["I"]
+            id_item = itens_req[pos % len(itens_req)][0]
             acao = Acao(
                 tenant_id=tenant.id,
-                id_certificacao=cert.id_certificacao,
+                id_auditoria=auditoria_atual.id,
                 id_requisito=req_id_por_cod[req],
                 id_item=id_item,
                 id_unidade=unid,
@@ -771,14 +831,12 @@ def popular_demo_negocio(db, tenant: Tenant) -> None:
             )
     db.flush()
 
-    # Certificação do ente (nível atual).
-    cert_atual = cert_por_nivel.get("III")
-    if cert_atual is not None:
-        cert_atual.status = "VENCIDA"
-        cert_atual.numero_certificado = "CERT-III-2024-0042"
-        cert_atual.data_certificacao = date(2024, 6, 1)
-        cert_atual.data_validade = date(2026, 6, 1)
-        cert_atual.entidade_certificadora = "IEPREV"
+    # Certificado do ente.
+    cert.status = "VENCIDA"
+    cert.numero_certificado = "CERT-III-2024-0042"
+    cert.data_certificacao = date(2024, 6, 1)
+    cert.data_validade = date(2026, 6, 1)
+    cert.entidade_certificadora = "IEPREV"
 
     # Processo Pró-Gestão.
     if db.query(ProcessoProgestao).filter(ProcessoProgestao.tenant_id == tenant.id).count() == 0:

@@ -28,30 +28,20 @@ class Nivel(Base):
     id_nivel = Column(Integer, primary_key=True)
     nome_nivel = Column(String(10), nullable=False)
 
-    certificacoes = relationship("Certificacao", back_populates="nivel")
-
 
 class Certificacao(Base):
-    """Certificação do ente: um registro por (ente, manual, nível).
+    """Certificado do ente: status, número, datas e entidade certificadora.
 
-    Reúne o que o manual oferece (manual + nível) e o que o ente tem
-    (status, número do certificado, datas e entidade certificadora).
+    A certificação é o guarda-chuva do ente. Cada auditoria dentro dela
+    seleciona um manual; as ações do plano ficam na auditoria.
     """
 
     __tablename__ = "certificacao"
     __table_args__ = (
-        UniqueConstraint(
-            "tenant_id", "id_manual", "id_nivel", name="uq_certificacao_tenant_manual_nivel"
-        ),
+        UniqueConstraint("tenant_id", "nome_certificacao", name="uq_certificacao_tenant_nome"),
     )
 
     id_certificacao = Column(Integer, primary_key=True)
-    id_manual = Column(
-        Integer, ForeignKey("manual.id_manual", ondelete="RESTRICT"), nullable=False
-    )
-    id_nivel = Column(
-        Integer, ForeignKey("nivel.id_nivel", ondelete="RESTRICT"), nullable=False
-    )
     tenant_id = Column(String(36), ForeignKey("tenants.id"), nullable=False)
     nome_certificacao = Column(String(200), nullable=False)
     status = Column(String(20), nullable=False, default="PENDENTE")
@@ -62,10 +52,13 @@ class Certificacao(Base):
     criado_em = Column(DateTime, default=datetime.utcnow)
     atualizado_em = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
-    manual = relationship("Manual", back_populates="certificacoes")
-    nivel = relationship("Nivel", back_populates="certificacoes")
     tenant = relationship("Tenant", back_populates="certificacoes")
-    acoes = relationship("Acao", back_populates="certificacao")
+    auditorias = relationship(
+        "Auditoria",
+        back_populates="certificacao",
+        cascade="all, delete-orphan",
+        order_by="Auditoria.data_auditoria",
+    )
 
 
 class ProcessoProgestao(Base):
@@ -95,16 +88,26 @@ class ProcessoProgestao(Base):
 
 
 class Auditoria(Base):
+    """Auditoria de uma certificação, em um manual."""
+
     __tablename__ = "auditorias"
 
     id = Column(String(36), primary_key=True, default=gen_uuid)
     tenant_id = Column(String(36), ForeignKey("tenants.id"), nullable=False)
+    id_certificacao = Column(
+        Integer,
+        ForeignKey("certificacao.id_certificacao", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    id_manual = Column(
+        Integer, ForeignKey("manual.id_manual", ondelete="RESTRICT"), nullable=False, index=True
+    )
     processo_id = Column(String(36), ForeignKey("processos_progestao.id"))
     tipo = Column(String(50), default="pre_auditoria")
     modalidade = Column(String(30), default="presencial")
     data_auditoria = Column(Date, nullable=False)
     duracao_horas = Column(Float)
-    nivel_auditado = Column(String(10))
     nivel_recomendado = Column(String(10))
     parecer_geral = Column(Text)
     conclusao = Column(String(30), default="pendente")  # aprovado|reprovado|pendente|diligencia
@@ -113,3 +116,7 @@ class Auditoria(Base):
     criado_por = Column(String(36), ForeignKey("usuarios.id"))
     criado_em = Column(DateTime, default=datetime.utcnow)
     atualizado_em = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    certificacao = relationship("Certificacao", back_populates="auditorias")
+    manual = relationship("Manual", back_populates="auditorias")
+    acoes = relationship("Acao", back_populates="auditoria")

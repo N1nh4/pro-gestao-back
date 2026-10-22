@@ -14,7 +14,7 @@ class RequisitoOut(BaseModel):
 
 
 class AcaoCreate(BaseModel):
-    id_certificacao: int | None = None
+    id_auditoria: str
     id_requisito: int
     id_item: int
     id_unidade: str | None = None
@@ -27,7 +27,7 @@ class AcaoCreate(BaseModel):
 
 
 class AcaoUpdate(BaseModel):
-    id_certificacao: int | None = None
+    id_auditoria: str | None = None
     id_requisito: int | None = None
     id_item: int | None = None
     id_unidade: str | None = None
@@ -61,7 +61,7 @@ class AcaoOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id_acao: int
-    id_certificacao: int
+    id_auditoria: str
     id_requisito: int
     id_item: int | None
     id_unidade: str
@@ -80,8 +80,9 @@ class AcaoOut(BaseModel):
     sigla_unidade: str = ""
     nome_unidade: str = ""
     nome_certificacao: str = ""
-    nome_nivel: str = ""
+    nome_manual: str = ""
     versao_manual: str = ""
+    nome_nivel: str = ""
     historico: list[AcaoHistoricoOut] = []
     documentos: list[AcaoDocumentoOut] = []
     diligencias_count: int = 0

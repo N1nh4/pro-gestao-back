@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import get_usuario_atual, requer_perfil
 from app.db import get_db
-from app.models import Acao, Certificacao, Dimensao, Item, Manual, Nivel, Requisito, Usuario
+from app.models import Acao, Auditoria, Dimensao, Item, Manual, Nivel, Requisito, Usuario
 from app.schemas import (
     DimensaoCreate,
     DimensaoOut,
@@ -107,6 +107,9 @@ def remover_manual(
     qtd = db.query(func.count(Requisito.id_requisito)).filter(Requisito.id_manual == id_manual).scalar()
     if qtd:
         raise HTTPException(status_code=409, detail="Manual possui requisitos vinculados")
+    qtd = db.query(func.count(Auditoria.id)).filter(Auditoria.id_manual == id_manual).scalar()
+    if qtd:
+        raise HTTPException(status_code=409, detail="Manual possui auditorias vinculadas")
     db.delete(manual)
     db.commit()
 
@@ -393,13 +396,9 @@ def remover_nivel(
     nivel = db.get(Nivel, id_nivel)
     if not nivel:
         raise HTTPException(status_code=404, detail="Nível não encontrado")
-    qtd = (
-        db.query(func.count(Certificacao.id_certificacao))
-        .filter(Certificacao.id_nivel == id_nivel)
-        .scalar()
-    )
+    qtd = db.query(func.count(Item.id_item)).filter(Item.nivel == nivel.nome_nivel).scalar()
     if qtd:
-        raise HTTPException(status_code=409, detail="Nível possui certificações vinculadas")
+        raise HTTPException(status_code=409, detail="Nível possui itens vinculados")
     db.delete(nivel)
     db.commit()
 

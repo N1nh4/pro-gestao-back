@@ -47,16 +47,21 @@ def test_listar_acoes(client, auth_headers):
 def test_criar_acao_impede_status_enviado_sem_upload(client, auth_headers):
     acoes = client.get("/api/acoes", headers=auth_headers).json()
     base = acoes[0]
+    aud = client.get(
+        f"/api/auditorias/{base['id_auditoria']}", headers=auth_headers
+    ).json()
     itens = client.get(
         "/api/catalogo/itens", headers=auth_headers, params={"id_requisito": base["id_requisito"]}
     ).json()
+    item = itens[0]
 
     create = client.post(
         "/api/acoes",
         headers=auth_headers,
         json={
+            "id_auditoria": aud["id"],
             "id_requisito": base["id_requisito"],
-            "id_item": itens[0]["id_item"],
+            "id_item": item["id_item"],
             "nome": "Ação de teste",
             "descricao": "Ação de teste",
             "prazo": "2026-12-31",
@@ -97,24 +102,30 @@ def test_certificacoes(client, auth_headers):
     resp = client.get("/api/certificacoes", headers=auth_headers)
     assert resp.status_code == 200
     certs = resp.json()
-    # Uma certificação por nível do manual, do ente.
-    assert len(certs) == 4
-    assert {c["nome_nivel"] for c in certs} == {"I", "II", "III", "IV"}
+    # Um certificado do ente, com quatro auditorias do manual.
+    assert len(certs) == 1
+    assert certs[0]["auditorias_count"] == 4
 
 
 def test_criar_auditoria(client, auth_headers):
+    cert = client.get("/api/certificacoes", headers=auth_headers).json()[0]
+    manuais = client.get("/api/catalogo/manuais", headers=auth_headers).json()
     resp = client.post(
         "/api/auditorias",
         headers=auth_headers,
         json={
+            "id_certificacao": cert["id_certificacao"],
+            "id_manual": manuais[0]["id_manual"],
             "data_auditoria": "2026-10-01",
-            "entidade_certificadora": "IEPREV",
             "auditor_nome": "Dr. Teste",
             "conclusao": "aprovado",
         },
     )
-    assert resp.status_code == 200, resp.text
+    assert resp.status_code == 201, resp.text
     assert resp.json()["conclusao"] == "aprovado"
+    assert client.delete(
+        f"/api/auditorias/{resp.json()['id']}", headers=auth_headers
+    ).status_code == 204
 
 
 def test_onboarding(client, auth_headers):

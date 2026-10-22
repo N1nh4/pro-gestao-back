@@ -16,6 +16,7 @@ from app.schemas.catalogo import (
 from app.schemas.certificacao import (
     AuditoriaCreate,
     AuditoriaOut,
+    AuditoriaUpdate,
     CertificacaoCreate,
     CertificacaoOut,
     CertificacaoUpdate,
@@ -97,6 +98,7 @@ __all__ = [
     "NivelUpdate",
     "AuditoriaCreate",
     "AuditoriaOut",
+    "AuditoriaUpdate",
     "TarefaCreate",
     "TarefaStatusUpdate",
     "EvidenciaCreate",

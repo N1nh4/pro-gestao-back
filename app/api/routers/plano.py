@@ -1,8 +1,9 @@
 """Ações do plano (tabela única `acao`): CRUD e mudança de status.
 
-Tudo por ID: `id_certificacao` → `certificacao`, `id_requisito` → `requisito`,
-`id_item` → `item` e `id_unidade` → `unidades`. A ação e o seu plano são o
-mesmo registro; os nomes são resolvidos por JOIN, nunca duplicados.
+Tudo por ID: `id_auditoria` -> `auditorias` (certificação + manual),
+`id_requisito` -> `requisito`, `id_item` -> `item` e `id_unidade` -> `unidades`.
+A ação e o seu plano são o mesmo registro; os nomes são resolvidos por JOIN,
+nunca duplicados.
 """
 
 from datetime import date, datetime
@@ -20,12 +21,11 @@ from app.core.config import get_settings
 from app.db import get_db
 from app.models import (
     Acao,
-    Certificacao,
+    Auditoria,
     Diligencia,
     Documento,
     HistoricoAcao,
     Item,
-    Nivel,
     Requisito,
     Unidade,
     Usuario,
@@ -65,10 +65,11 @@ def _montar_out(db: Session, a: Acao) -> AcaoOut:
         .filter(Diligencia.acao_id == a.id_acao)
         .scalar()
     )
-    cert = a.certificacao
+    cert = a.auditoria.certificacao if a.auditoria else None
+    audit = a.auditoria
     return AcaoOut(
         id_acao=a.id_acao,
-        id_certificacao=a.id_certificacao,
+        id_auditoria=a.id_auditoria,
         id_requisito=a.id_requisito,
         id_item=a.id_item,
         id_unidade=a.id_unidade,
@@ -86,8 +87,9 @@ def _montar_out(db: Session, a: Acao) -> AcaoOut:
         sigla_unidade=a.unidade.sigla if a.unidade else "",
         nome_unidade=a.unidade.nome if a.unidade else "",
         nome_certificacao=cert.nome_certificacao if cert else "",
-        nome_nivel=cert.nivel.nome_nivel if cert and cert.nivel else "",
-        versao_manual=cert.manual.versao_manual if cert and cert.manual else "",
+        nome_manual=audit.manual.nome_manual if audit and audit.manual else "",
+        versao_manual=audit.manual.versao_manual if audit and audit.manual else "",
+        nome_nivel=a.item.nivel if a.item else "",
         historico=[
             {"dt": h.data_evento.strftime("%d/%m"), "ev": h.descricao_evento}
             for h in hist
@@ -118,39 +120,28 @@ def _buscar(db: Session, id_acao: int, tenant_id: str) -> Acao:
     return acao
 
 
-def _resolver_certificacao(
-    db: Session, tenant_id: str, requisito: Requisito, item: Item | None
-) -> Certificacao:
-    """Certificação do ente: manual do requisito no nível do item."""
-    if item is not None:
-        cert = (
-            db.query(Certificacao)
-            .join(Nivel, Nivel.id_nivel == Certificacao.id_nivel)
-            .filter(
-                Certificacao.tenant_id == tenant_id,
-                Certificacao.id_manual == requisito.id_manual,
-                Nivel.nome_nivel == item.nivel,
-            )
-            .first()
-        )
-        if cert:
-            return cert
-    cert = (
-        db.query(Certificacao)
-        .join(Nivel, Nivel.id_nivel == Certificacao.id_nivel)
-        .filter(
-            Certificacao.tenant_id == tenant_id,
-            Certificacao.id_manual == requisito.id_manual,
-        )
-        .order_by(Nivel.nome_nivel)
+def _buscar_auditoria(
+    db: Session, tenant_id: str, id_auditoria: str | None
+) -> Auditoria:
+    if not id_auditoria:
+        raise HTTPException(status_code=422, detail="Auditoria é obrigatória")
+    aud = (
+        db.query(Auditoria)
+        .filter(Auditoria.id == id_auditoria, Auditoria.tenant_id == tenant_id)
         .first()
     )
-    if cert:
-        return cert
-    raise HTTPException(
-        status_code=422,
-        detail="Certificação não encontrada para o manual do requisito",
-    )
+    if not aud:
+        raise HTTPException(status_code=422, detail="Auditoria não encontrada")
+    return aud
+
+
+def _validar_escopo_auditoria(auditoria: Auditoria, requisito: Requisito) -> None:
+    """A ação pertence ao manual da auditoria."""
+    if requisito.id_manual != auditoria.id_manual:
+        raise HTTPException(
+            status_code=422,
+            detail="O requisito não pertence ao manual da auditoria",
+        )
 
 
 def _validar_relacoes(
@@ -183,6 +174,7 @@ def listar_acoes(
     dimensao: str | None = Query(None),
     id_unidade: str | None = Query(None),
     id_requisito: int | None = Query(None),
+    id_auditoria: str | None = Query(None),
     id_certificacao: int | None = Query(None),
     db: Session = Depends(get_db),
     usuario: Usuario = Depends(get_usuario_atual),
@@ -202,7 +194,11 @@ def listar_acoes(
     if id_requisito:
         q = q.filter(Acao.id_requisito == id_requisito)
     if id_certificacao:
-        q = q.filter(Acao.id_certificacao == id_certificacao)
+        q = q.join(Auditoria, Auditoria.id == Acao.id_auditoria).filter(
+            Auditoria.id_certificacao == id_certificacao
+        )
+    if id_auditoria:
+        q = q.filter(Acao.id_auditoria == id_auditoria)
     if dimensao:
         prefixo = _PREFIXO_DIMENSAO.get(dimensao, "")
         if prefixo:
@@ -215,8 +211,8 @@ def listar_acoes(
             joinedload(Acao.requisito),
             joinedload(Acao.unidade),
             joinedload(Acao.item),
-            joinedload(Acao.certificacao).joinedload(Certificacao.nivel),
-            joinedload(Acao.certificacao).joinedload(Certificacao.manual),
+            joinedload(Acao.auditoria).joinedload(Auditoria.manual),
+            joinedload(Acao.auditoria).joinedload(Auditoria.certificacao),
         )
         .order_by(Acao.prazo, Acao.id_acao)
         .all()
@@ -365,24 +361,21 @@ def criar_acoes(
         )
 
     criado: list[Acao] = []
+    auditoria = _buscar_auditoria(db, atual.tenant_id, req.id_auditoria)
+
     for uid in alvos:
-        requisito, item, _ = _validar_relacoes(
+        requisito, _, _ = _validar_relacoes(
             db,
             tenant_id=atual.tenant_id,
             id_requisito=req.id_requisito,
             id_item=req.id_item,
             id_unidade=uid,
         )
-        if req.id_certificacao is not None:
-            cert = db.get(Certificacao, req.id_certificacao)
-            if not cert or cert.tenant_id != atual.tenant_id:
-                raise HTTPException(status_code=422, detail="Certificação não encontrada")
-        else:
-            cert = _resolver_certificacao(db, atual.tenant_id, requisito, item)
+        _validar_escopo_auditoria(auditoria, requisito)
 
         acao = Acao(
             tenant_id=atual.tenant_id,
-            id_certificacao=cert.id_certificacao,
+            id_auditoria=auditoria.id,
             id_requisito=req.id_requisito,
             id_item=req.id_item,
             id_unidade=uid,
@@ -435,21 +428,18 @@ def atualizar_acao(
     id_unidade = dados.get("id_unidade", acao.id_unidade)
     if id_item is None:
         raise HTTPException(status_code=422, detail="Informe o item da ação")
-    requisito, item, _ = _validar_relacoes(
+    requisito, _, _ = _validar_relacoes(
         db,
         tenant_id=usuario.tenant_id,
         id_requisito=id_requisito,
         id_item=id_item,
         id_unidade=id_unidade,
     )
-    if "id_certificacao" in dados:
-        cert = db.get(Certificacao, dados["id_certificacao"])
-        if not cert or cert.tenant_id != usuario.tenant_id:
-            raise HTTPException(status_code=422, detail="Certificação não encontrada")
-    else:
-        dados["id_certificacao"] = _resolver_certificacao(
-            db, usuario.tenant_id, requisito, item
-        ).id_certificacao
+    auditoria = _buscar_auditoria(
+        db, usuario.tenant_id, dados.get("id_auditoria") or acao.id_auditoria
+    )
+    _validar_escopo_auditoria(auditoria, requisito)
+    dados["id_auditoria"] = auditoria.id
 
     for campo, valor in dados.items():
         setattr(acao, campo, valor)

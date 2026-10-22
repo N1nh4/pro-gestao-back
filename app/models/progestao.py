@@ -29,7 +29,7 @@ class Manual(Base):
     versao_manual = Column(String(20), nullable=False, unique=True)
 
     requisitos = relationship("Requisito", back_populates="manual")
-    certificacoes = relationship("Certificacao", back_populates="manual")
+    auditorias = relationship("Auditoria", back_populates="manual")
 
 
 class Dimensao(Base):
@@ -128,8 +128,8 @@ class Acao(Base):
 
     id_acao = Column(Integer, primary_key=True, autoincrement=True)
     tenant_id = Column(String(36), ForeignKey("tenants.id"), nullable=False)
-    id_certificacao = Column(
-        Integer, ForeignKey("certificacao.id_certificacao"), nullable=False
+    id_auditoria = Column(
+        String(36), ForeignKey("auditorias.id", ondelete="RESTRICT"), nullable=False, index=True
     )
     id_requisito = Column(
         Integer, ForeignKey("requisito.id_requisito"), nullable=False
@@ -147,7 +147,7 @@ class Acao(Base):
     atualizado_em = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     tenant = relationship("Tenant", back_populates="acoes")
-    certificacao = relationship("Certificacao", back_populates="acoes")
+    auditoria = relationship("Auditoria", back_populates="acoes")
     requisito = relationship("Requisito", back_populates="acoes")
     unidade = relationship("Unidade", back_populates="acoes")
     criado_por_usuario = relationship(

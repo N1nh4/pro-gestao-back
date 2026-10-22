@@ -1,4 +1,4 @@
-"""Testes dos níveis, das certificações (tabela única) e das ações do plano."""
+"""Testes de níveis, certificações, auditorias e ações do plano."""
 
 from datetime import date, timedelta
 
@@ -7,6 +7,24 @@ def _login(client, email: str) -> dict:
     resp = client.post("/api/auth/login", json={"email": email, "senha": "Demo@2026!"})
     assert resp.status_code == 200, resp.text
     return {"Authorization": f"Bearer {resp.json()['access_token']}"}
+
+
+def _item_da_auditoria(client, headers, auditoria: dict) -> tuple[dict, dict]:
+    """Primeiro requisito/item do manual da auditoria."""
+    reqs = client.get(
+        "/api/catalogo/requisitos",
+        headers=headers,
+        params={"id_manual": auditoria["id_manual"]},
+    ).json()
+    for req in reqs:
+        itens = client.get(
+            "/api/catalogo/itens",
+            headers=headers,
+            params={"id_requisito": req["id_requisito"]},
+        ).json()
+        if itens:
+            return req, itens[0]
+    raise AssertionError("Nenhum item para a auditoria")
 
 
 # ── NÍVEIS ───────────────────────────────────────────────────────
@@ -38,109 +56,59 @@ def test_criar_nivel_e_rejeitar_duplicado(client, auth_headers):
     assert client.delete(f"/api/catalogo/niveis/{id_nivel}", headers=auth_headers).status_code == 204
 
 
-def test_nao_remover_nivel_com_certificacao(client, auth_headers):
+def test_nao_remover_nivel_com_itens(client, auth_headers):
     niveis = client.get("/api/catalogo/niveis", headers=auth_headers).json()
     id_nivel = niveis[0]["id_nivel"]
     resp = client.delete(f"/api/catalogo/niveis/{id_nivel}", headers=auth_headers)
     assert resp.status_code == 409
-    assert "certifica" in resp.json()["detail"].lower()
+    assert "itens" in resp.json()["detail"].lower()
 
 
-# ── CERTIFICAÇÕES (ente + manual + nível) ────────────────────────
+# ── CERTIFICAÇÕES (certificado do ente) ──────────────────────────
 
 
-def test_listar_certificacoes_com_nomes_por_join(client, auth_headers):
-    manuais = client.get("/api/catalogo/manuais", headers=auth_headers).json()
-    id_manual = manuais[0]["id_manual"]
-
-    resp = client.get(
-        "/api/certificacoes", headers=auth_headers, params={"id_manual": id_manual}
-    )
+def test_listar_e_obter_certificacao(client, auth_headers):
+    resp = client.get("/api/certificacoes", headers=auth_headers)
     assert resp.status_code == 200, resp.text
     certs = resp.json()
-    assert len(certs) == 4
-    assert {c["nome_nivel"] for c in certs} == {"I", "II", "III", "IV"}
-    # Nome do manual e do nível vêm por JOIN, não são denormalizados.
-    assert all(c["nome_manual"] == manuais[0]["nome_manual"] for c in certs)
-    assert all(c["versao_manual"] == manuais[0]["versao_manual"] for c in certs)
-    assert all(c["id_certificacao"] > 0 for c in certs)
+    assert len(certs) == 1
+    cert = certs[0]
+    assert cert["nome_certificacao"] == "Certificação Pró-Gestão RPPS"
+    assert cert["status"] == "VENCIDA"
+    assert cert["numero_certificado"] == "CERT-III-2024-0042"
+    assert cert["auditorias_count"] == 4
+    assert cert["acoes_count"] > 0
 
-
-def test_criar_certificacao_valida_dependencias(client, auth_headers):
-    manuais = client.get("/api/catalogo/manuais", headers=auth_headers).json()
-    id_manual = manuais[0]["id_manual"]
-    niveis = client.get("/api/catalogo/niveis", headers=auth_headers).json()
-
-    # Manual inexistente
-    resp = client.post(
-        "/api/certificacoes",
-        headers=auth_headers,
-        json={
-            "id_manual": 999999,
-            "id_nivel": niveis[0]["id_nivel"],
-            "nome_certificacao": "Inválida",
-        },
+    detalhe = client.get(
+        f"/api/certificacoes/{cert['id_certificacao']}", headers=auth_headers
     )
-    assert resp.status_code == 422
+    assert detalhe.status_code == 200, detalhe.text
+    assert detalhe.json()["auditorias_count"] == 4
 
-    # Nível inexistente
+
+def test_criar_certificacao_e_rejeitar_duplicidade(client, auth_headers):
+    # Nome duplicado no mesmo ente.
     resp = client.post(
         "/api/certificacoes",
         headers=auth_headers,
-        json={
-            "id_manual": id_manual,
-            "id_nivel": 999999,
-            "nome_certificacao": "Inválida",
-        },
-    )
-    assert resp.status_code == 422
-
-    # Duplicidade (ente + manual + nível já cadastrado pelo seed)
-    resp = client.post(
-        "/api/certificacoes",
-        headers=auth_headers,
-        json={
-            "id_manual": id_manual,
-            "id_nivel": niveis[0]["id_nivel"],
-            "nome_certificacao": "Duplicada",
-        },
+        json={"nome_certificacao": "Certificação Pró-Gestão RPPS"},
     )
     assert resp.status_code == 409
 
+    # Status inválido.
+    resp = client.post(
+        "/api/certificacoes",
+        headers=auth_headers,
+        json={"nome_certificacao": "Certificação inválida", "status": "QUALQUER"},
+    )
+    assert resp.status_code == 422
+
 
 def test_atualizar_e_remover_certificacao(client, auth_headers):
-    manuais = client.get("/api/catalogo/manuais", headers=auth_headers).json()
-    id_manual = manuais[0]["id_manual"]
-    niveis = client.get("/api/catalogo/niveis", headers=auth_headers).json()
-
     resp = client.post(
         "/api/certificacoes",
         headers=auth_headers,
-        json={
-            "id_manual": id_manual,
-            "id_nivel": niveis[0]["id_nivel"],
-            "nome_certificacao": "Certificação temporária",
-        },
-    )
-    assert resp.status_code == 409  # já existe para o nível
-
-    # Usa outro manual (sem certificações) para o ciclo completo.
-    resp = client.post(
-        "/api/catalogo/manuais",
-        headers=auth_headers,
-        json={"nome_manual": "Manual de teste", "versao_manual": "9.9"},
-    )
-    assert resp.status_code == 201, resp.text
-    id_manual_novo = resp.json()["id_manual"]
-
-    resp = client.post(
-        "/api/certificacoes",
-        headers=auth_headers,
-        json={
-            "id_manual": id_manual_novo,
-            "id_nivel": niveis[0]["id_nivel"],
-            "nome_certificacao": "Certificação temporária",
-        },
+        json={"nome_certificacao": "Certificação temporária"},
     )
     assert resp.status_code == 201, resp.text
     id_cert = resp.json()["id_certificacao"]
@@ -168,13 +136,120 @@ def test_atualizar_e_remover_certificacao(client, auth_headers):
     assert (
         client.delete(f"/api/certificacoes/{id_cert}", headers=auth_headers).status_code == 204
     )
+
+
+def test_nao_remover_certificacao_com_auditorias(client, auth_headers):
+    cert = client.get("/api/certificacoes", headers=auth_headers).json()[0]
+    resp = client.delete(
+        f"/api/certificacoes/{cert['id_certificacao']}", headers=auth_headers
+    )
+    assert resp.status_code == 409
+    assert "auditoria" in resp.json()["detail"].lower()
+
+
+# ── AUDITORIAS (certificação + manual) ───────────────────────────
+
+
+def test_listar_auditorias_com_nomes_por_join(client, auth_headers):
+    resp = client.get("/api/auditorias", headers=auth_headers)
+    assert resp.status_code == 200, resp.text
+    auds = resp.json()
+    assert len(auds) == 4
+    assert {a["tipo"] for a in auds} == {
+        "auditoria_inicial",
+        "supervisao_documental",
+        "supervisao_presencial",
+        "renovacao",
+    }
+    assert all(a["nome_manual"] == "Manual do Pró-Gestão RPPS" for a in auds)
+    assert all(a["versao_manual"] == "4.1" for a in auds)
+    assert all(a["nome_certificacao"] == "Certificação Pró-Gestão RPPS" for a in auds)
+    assert all(a["id_certificacao"] > 0 for a in auds)
+    assert any(a["acoes_count"] > 0 for a in auds)
+
+
+def test_criar_auditoria_valida_dependencias(client, auth_headers):
+    cert = client.get("/api/certificacoes", headers=auth_headers).json()[0]
+    manuais = client.get("/api/catalogo/manuais", headers=auth_headers).json()
+
+    base = {
+        "id_certificacao": cert["id_certificacao"],
+        "id_manual": manuais[0]["id_manual"],
+        "data_auditoria": "2026-10-01",
+        "auditor_nome": "Dr. Teste",
+    }
+
     assert (
-        client.delete(f"/api/catalogo/manuais/{id_manual_novo}", headers=auth_headers).status_code
-        == 204
+        client.post(
+            "/api/auditorias", headers=auth_headers, json={**base, "id_certificacao": 999999}
+        ).status_code
+        == 422
+    )
+    assert (
+        client.post(
+            "/api/auditorias", headers=auth_headers, json={**base, "id_manual": 999999}
+        ).status_code
+        == 422
     )
 
+    criada = client.post("/api/auditorias", headers=auth_headers, json=base)
+    assert criada.status_code == 201, criada.text
+    id_aud = criada.json()["id"]
+    assert criada.json()["acoes_count"] == 0
 
-# ── AÇÕES (tabela única) ──────────────────────────────────────────
+    assert client.get(f"/api/auditorias/{id_aud}", headers=auth_headers).status_code == 200
+    assert client.delete(f"/api/auditorias/{id_aud}", headers=auth_headers).status_code == 204
+
+
+def test_atualizar_auditoria(client, auth_headers):
+    aud = next(
+        a for a in client.get("/api/auditorias", headers=auth_headers).json()
+        if a["acoes_count"] == 0
+    )
+    resp = client.put(
+        f"/api/auditorias/{aud['id']}",
+        headers=auth_headers,
+        json={"parecer_geral": "Parecer revisado", "conclusao": "aprovado"},
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["parecer_geral"] == "Parecer revisado"
+    assert resp.json()["conclusao"] == "aprovado"
+
+
+def test_nao_alterar_escopo_de_auditoria_com_acoes(client, auth_headers):
+    aud = next(
+        a for a in client.get("/api/auditorias", headers=auth_headers).json()
+        if a["acoes_count"] > 0
+    )
+    outro = client.post(
+        "/api/catalogo/manuais",
+        headers=auth_headers,
+        json={"nome_manual": "Manual de teste", "versao_manual": "1.0"},
+    )
+    assert outro.status_code == 201, outro.text
+    id_outro_manual = outro.json()["id_manual"]
+
+    try:
+        resp = client.put(
+            f"/api/auditorias/{aud['id']}",
+            headers=auth_headers,
+            json={"id_manual": id_outro_manual},
+        )
+        assert resp.status_code == 409
+        assert "ações" in resp.json()["detail"]
+    finally:
+        assert (
+            client.delete(
+                f"/api/catalogo/manuais/{id_outro_manual}", headers=auth_headers
+            ).status_code
+            == 204
+        )
+
+    remover = client.delete(f"/api/auditorias/{aud['id']}", headers=auth_headers)
+    assert remover.status_code == 409
+
+
+# ── AÇÕES (tabela única, dentro da auditoria) ────────────────────
 
 
 def test_listar_acoes_com_nomes_por_join(client, auth_headers):
@@ -188,22 +263,24 @@ def test_listar_acoes_com_nomes_por_join(client, auth_headers):
     assert primeiro["cod_requisito"] != ""
     assert primeiro["sigla_unidade"] != ""
     assert primeiro["id_requisito"] > 0
-    assert primeiro["id_certificacao"] > 0
+    assert primeiro["id_auditoria"]
     assert primeiro["nome_certificacao"] != ""
+    assert primeiro["nome_nivel"] != ""
     assert primeiro["historico"] is not None
 
 
 def test_criar_acao_uma_por_unidade(client, auth_headers):
-    reqs = client.get("/api/catalogo/requisitos", headers=auth_headers).json()
-    id_requisito = reqs[0]["id_requisito"]
-    itens = client.get(
-        "/api/catalogo/itens", headers=auth_headers, params={"id_requisito": id_requisito}
+    acao_base = client.get("/api/acoes", headers=auth_headers).json()[0]
+    aud = client.get(
+        f"/api/auditorias/{acao_base['id_auditoria']}", headers=auth_headers
     ).json()
+    req, item = _item_da_auditoria(client, auth_headers, aud)
     unidades = client.get("/api/unidades", headers=auth_headers).json()
 
     payload = {
-        "id_requisito": id_requisito,
-        "id_item": itens[0]["id_item"],
+        "id_auditoria": aud["id"],
+        "id_requisito": req["id_requisito"],
+        "id_item": item["id_item"],
         "nome": "Ação de teste",
         "descricao": "Descrição da ação de teste",
         "prazo": (date.today() + timedelta(days=30)).isoformat(),
@@ -217,8 +294,7 @@ def test_criar_acao_uma_por_unidade(client, auth_headers):
     assert criadas[0]["id_unidade"] == unidades[0]["id"]
     assert criadas[1]["id_unidade"] == unidades[1]["id"]
     assert criadas[0]["status"] == "PENDENTE"
-    # A certificação do ente é resolvida automaticamente (manual + nível do item).
-    assert criadas[0]["id_certificacao"] > 0
+    assert criadas[0]["id_auditoria"] == aud["id"]
 
     for criada in criadas:
         assert (
@@ -228,15 +304,14 @@ def test_criar_acao_uma_por_unidade(client, auth_headers):
 
 
 def test_criar_acao_valida_relacoes(client, auth_headers):
-    acoes = client.get("/api/acoes", headers=auth_headers).json()
-    acao = acoes[0]
-    itens = client.get(
-        "/api/catalogo/itens", headers=auth_headers, params={"id_requisito": acao["id_requisito"]}
-    ).json()
+    acao = client.get("/api/acoes", headers=auth_headers).json()[0]
+    aud = client.get(f"/api/auditorias/{acao['id_auditoria']}", headers=auth_headers).json()
+    req, item = _item_da_auditoria(client, auth_headers, aud)
 
     payload = {
-        "id_requisito": acao["id_requisito"],
-        "id_item": itens[0]["id_item"],
+        "id_auditoria": aud["id"],
+        "id_requisito": req["id_requisito"],
+        "id_item": item["id_item"],
         "nome": "Ação de teste",
         "descricao": "Descrição da ação de teste",
         "prazo": (date.today() + timedelta(days=30)).isoformat(),
@@ -246,65 +321,78 @@ def test_criar_acao_valida_relacoes(client, auth_headers):
     assert resp.status_code == 201, resp.text
     id_acao = resp.json()[0]["id_acao"]
 
-    # Item de outro requisito é rejeitado (FK composta).
-    outro_req = client.get(
-        "/api/catalogo/requisitos", headers=auth_headers, params={"id_manual": 1}
-    ).json()
-    outro_id_req = next(
-        r["id_requisito"] for r in outro_req if r["id_requisito"] != acao["id_requisito"]
-    )
-    itens_outro = client.get(
-        "/api/catalogo/itens", headers=auth_headers, params={"id_requisito": outro_id_req}
-    ).json()
-    resp = client.post(
-        "/api/acoes", headers=auth_headers, json={**payload, "id_item": itens_outro[0]["id_item"]}
-    )
-    assert resp.status_code == 422
+    try:
+        # Item de outro requisito é rejeitado (FK composta).
+        outro_req = client.get(
+            "/api/catalogo/requisitos", headers=auth_headers, params={"id_manual": aud["id_manual"]}
+        ).json()
+        outro_id_req = next(
+            r["id_requisito"] for r in outro_req if r["id_requisito"] != req["id_requisito"]
+        )
+        itens_outro = client.get(
+            "/api/catalogo/itens", headers=auth_headers, params={"id_requisito": outro_id_req}
+        ).json()
+        resp = client.post(
+            "/api/acoes",
+            headers=auth_headers,
+            json={**payload, "id_item": itens_outro[0]["id_item"]},
+        )
+        assert resp.status_code == 422
 
-    # Requisito inexistente
-    resp = client.post(
-        "/api/acoes", headers=auth_headers, json={**payload, "id_requisito": 999999}
-    )
-    assert resp.status_code == 422
+        # Requisito inexistente
+        resp = client.post(
+            "/api/acoes", headers=auth_headers, json={**payload, "id_requisito": 999999}
+        )
+        assert resp.status_code == 422
 
-    # Status inválido
-    resp = client.post(
-        "/api/acoes", headers=auth_headers, json={**payload, "status": "XYZ"}
-    )
-    assert resp.status_code == 422
+        # Auditoria inexistente
+        resp = client.post(
+            "/api/acoes",
+            headers=auth_headers,
+            json={**payload, "id_auditoria": "00000000-0000-0000-0000-000000000000"},
+        )
+        assert resp.status_code == 422
 
-    # O status ENVIADO só pode ser definido após o upload da comprovação.
-    resp = client.patch(
-        f"/api/acoes/{id_acao}/status", headers=auth_headers, json={"status": "ENVIADO"}
-    )
-    assert resp.status_code == 409
-    assert "documento" in resp.json()["detail"]
+        # Status inválido
+        resp = client.post(
+            "/api/acoes", headers=auth_headers, json={**payload, "status": "XYZ"}
+        )
+        assert resp.status_code == 422
 
-    # Edição mantém o registro e os nomes resolvidos por JOIN.
-    upd = client.put(
-        f"/api/acoes/{id_acao}",
-        headers=auth_headers,
-        json={"nome": "Ação editada", "descricao": "Descrição editada"},
-    )
-    assert upd.status_code == 200, upd.text
-    assert upd.json()["nome"] == "Ação editada"
-    assert upd.json()["cod_requisito"] == acao["cod_requisito"]
+        # O status ENVIADO só pode ser definido após o upload da comprovação.
+        resp = client.patch(
+            f"/api/acoes/{id_acao}/status", headers=auth_headers, json={"status": "ENVIADO"}
+        )
+        assert resp.status_code == 409
+        assert "documento" in resp.json()["detail"]
 
-    assert client.delete(f"/api/acoes/{id_acao}", headers=auth_headers).status_code == 204
+        # Edição mantém o registro e os nomes resolvidos por JOIN.
+        upd = client.put(
+            f"/api/acoes/{id_acao}",
+            headers=auth_headers,
+            json={"nome": "Ação editada", "descricao": "Descrição editada"},
+        )
+        assert upd.status_code == 200, upd.text
+        assert upd.json()["nome"] == "Ação editada"
+        assert upd.json()["cod_requisito"] == req["cod_requisito"]
+    finally:
+        assert client.delete(f"/api/acoes/{id_acao}", headers=auth_headers).status_code == 204
+
     assert client.get(f"/api/acoes/{id_acao}", headers=auth_headers).status_code == 404
 
 
 def test_upload_comprovacao_transiciona_acao_e_permite_revisao(client, auth_headers):
     operador_headers = _login(client, "operador@fumpres.ba.gov.br")
     acao_base = client.get("/api/acoes", headers=auth_headers).json()[0]
-    itens = client.get(
-        "/api/catalogo/itens",
-        headers=auth_headers,
-        params={"id_requisito": acao_base["id_requisito"]},
+    aud = client.get(
+        f"/api/auditorias/{acao_base['id_auditoria']}", headers=auth_headers
     ).json()
+    req, item = _item_da_auditoria(client, auth_headers, aud)
+
     payload = {
-        "id_requisito": acao_base["id_requisito"],
-        "id_item": itens[0]["id_item"],
+        "id_auditoria": aud["id"],
+        "id_requisito": req["id_requisito"],
+        "id_item": item["id_item"],
         "nome": "Ação com comprovação",
         "descricao": "Ação usada para validar o envio de documento",
         "prazo": (date.today() + timedelta(days=30)).isoformat(),
@@ -389,6 +477,7 @@ def test_acao_exige_perfil_admin(client):
         "/api/acoes",
         headers=headers,
         json={
+            "id_auditoria": acoes[0]["id_auditoria"],
             "id_requisito": acoes[0]["id_requisito"],
             "id_item": acoes[0]["id_item"],
             "nome": "X",
@@ -396,5 +485,15 @@ def test_acao_exige_perfil_admin(client):
             "prazo": "2026-12-31",
             "unidade_ids": [acoes[0]["id_unidade"]],
         },
+    )
+    assert resp.status_code == 403
+
+
+def test_acao_exige_perfil_admin_para_auditoria(client):
+    headers = _login(client, "viewer@previc.gov.br")
+    resp = client.post(
+        "/api/certificacoes",
+        headers=headers,
+        json={"nome_certificacao": "Sem permissão"},
     )
     assert resp.status_code == 403
