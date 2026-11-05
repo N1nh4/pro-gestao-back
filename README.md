@@ -115,4 +115,21 @@ backend/
 | BI               | `GET /api/bi/consolidado`                                        |
 | Certificações    | `/api/certificacoes` · `/api/auditorias`                         |
 | Operacional      | `/api/tarefas` · `/api/evidencias` · `/api/onboarding` · `/api/processos` |
-| Sistema          | `GET /api/health`                                                |
+| Sistema          | `GET /api/health` · `GET /api/health/ready`                      |
+
+## Docker / deploy
+
+A imagem de produção usa `requirements.txt` + `Dockerfile` (Uvicorn em
+`:8000`, usuário não-root, uploads em `/app/uploads`). O entrypoint roda
+`python -m app.db.seed` quando `RUN_DB_INIT=true` e depois inicia o servidor.
+
+```bash
+docker build -t sac-progestao-api ./backend
+docker run --rm -p 8000:8000 \
+  -e DATABASE_URL='postgresql+psycopg://user:pass@host:5432/db' \
+  -e SECRET_KEY='troque' \
+  sac-progestao-api
+```
+
+Para o stack completo (Postgres + Redis + API + frontend), OKD e GitLab, veja
+[`DEPLOY.md`](../DEPLOY.md).
